@@ -1,0 +1,13 @@
+# Copy to manifest.yaml and edit for your data. Dims are cross-checked against the
+# on-disk array and will fail loudly if they disagree.
+datasets:
+  - id: ROI2
+    zarr_path: data/ROI2/raw.zarr
+    component: "0/0"
+    dims: {T: 120, C: 3, Z: 301, Y: 401, X: 369}
+    voxel_um: 0.14499219272808386
+    channels:
+      candida: "FF0000"
+      macrophage: "00FF00"
+      discard: ["FF00FF"]
+    parallel_unit: timepoint

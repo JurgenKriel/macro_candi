@@ -1,0 +1,7 @@
+{
+  "cellprob_threshold": 0.0,
+  "flow3D_smooth": 0,
+  "min_size": 15,
+  "batch_size": 8,
+  "anisotropy": 1.0
+}

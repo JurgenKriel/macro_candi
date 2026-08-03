@@ -1,0 +1,38 @@
+[workspace]
+name = "canmac"
+version = "0.1.0"
+description = "Candida-macrophage 3D timelapse quantification pipeline (ingest/calibration/streaming I/O)"
+channels = ["https://prefix.dev/conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]           # conda-forge (non-torch stack)
+python       = "3.12.*"
+zarr         = ">=3.2"
+dask         = "*"
+"ome-zarr"   = ">=0.18"
+scikit-image = ">=0.26"
+napari       = ">=0.8"
+skan         = ">=0.13"
+networkx     = ">=3.6"
+matplotlib   = "*"
+pandas       = "*"
+pyyaml       = "*"
+pytest       = ">=8"
+jupyterlab   = "*"          # D-11: notebook server under OpenOnDemand/JupyterHub
+ipywidgets   = "*"          # D-10: Z-slice slider / interactive overlay
+ipympl       = "*"          # D-10: %matplotlib widget interactive canvas
+ipykernel    = "*"          # D-11: register the `canmac` Jupyter kernel
+
+[pypi-dependencies]      # cu124 matches the cluster GPU driver 580.159.03 (>= CUDA 12.4)
+torch    = { version = ">=2.5", index = "https://download.pytorch.org/whl/cu124" }
+cellpose = ">=4.2"
+
+[activation.env]
+CELLPOSE_LOCAL_MODELS_PATH = "/vast/scratch/users/kriel.j/cellpose_models"  # D-04: parent dir of the staged `cpsam` weight (cellpose joins MODEL_DIR/"cpsam"); the old /vast/projects path did not exist and forced a runtime download on the internet-less GPU node
+# The site default XDG_CACHE_HOME points at the over-quota /vast/projects share,
+# which makes napari (and others) fail to create their runtime cache. Pin the
+# cache to scratch so every `pixi run` has a writable cache (D-09 reproducibility).
+XDG_CACHE_HOME = "/vast/scratch/users/kriel.j/.cache"
+
+[tasks]
+smoke = "python -c \"import torch,zarr,dask,ome_zarr,skimage,skan,napari,cellpose,networkx; assert torch.cuda.is_available(), 'CUDA not available'; print('OK', torch.version.cuda)\""

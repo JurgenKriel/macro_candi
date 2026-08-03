@@ -1,0 +1,38 @@
+[project]
+name = "canmac-microsam"
+version = "0.1.0"
+description = "Isolated micro_sam (vit_l_lm) env for candida segmentation — separate from the main cu124-torch/Cellpose env (CLAUDE.md isolation pattern). Exchanges masks via zarr."
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+# The login node has NO GPU, so conda-forge would filter out CUDA pytorch builds
+# (no __cuda virtual pkg) and backtrack to an ancient CPU build. Advertise CUDA at
+# SOLVE time so the cuda build resolves; the GPU nodes provide real CUDA at runtime.
+[system-requirements]
+cuda = "12.4"
+
+# Conda-only (NO pypi torch here): micro_sam pulls conda pytorch-gpu, deliberately isolated
+# from the main env's pinned pip cu124 torch so it can never break Cellpose GPU.
+[dependencies]
+python = "3.11.*"
+micro_sam = "1.8.*"
+pytorch-gpu = ">=2.4"
+# I/O so this env can read raw.zarr candida volumes + write masks (and import canmac, pure-python)
+zarr = "*"
+dask = "*"
+scikit-image = "*"
+numpy = "*"
+pandas = "*"
+pyyaml = "*"
+ome-zarr = "*"
+napari = "*"
+
+[activation.env]
+# Same scratch-cache discipline as the main env (the /vast/projects XDG default is over quota).
+PIXI_CACHE_DIR = "/vast/scratch/users/kriel.j/pixi-cache"
+XDG_CACHE_HOME = "/vast/scratch/users/kriel.j/.cache"
+# Pre-staged micro_sam weights (offline GPU nodes): download here on the login node.
+MICROSAM_CACHEDIR = "/vast/scratch/users/kriel.j/microsam_models"
+
+[tasks]
+gpucheck = "python -c \"import torch; print('cuda', torch.cuda.is_available(), torch.version.cuda)\""

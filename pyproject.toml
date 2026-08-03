@@ -1,0 +1,6 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "gpu: tests requiring a CUDA GPU (run on a GPU node, gated by RUN_GPU)",
+]

@@ -1,0 +1,10 @@
+{
+  "cellprob_threshold": 0.5,
+  "flow3D_smooth": 2,
+  "min_size": 5,
+  "batch_size": 8,
+  "preprocess": "tophat",
+  "tophat_radius": 10,
+  "dog_low": 1.0,
+  "dog_high": 6.0
+}

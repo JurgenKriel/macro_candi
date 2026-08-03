@@ -1,0 +1,22 @@
+# --- environments (rebuilt from the committed lockfiles) ---
+.pixi/
+microsam_env/.pixi/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- data & outputs: never commit ---
+*.czi
+*.zarr/
+*.ome.tiff
+data/
+full_stack/
+ROI*/
+results/
+logs/
+models/          # pre-staged model weights (GB-scale)
+
+# --- site-local ---
+config.local.sh
+manifest.yaml    # site-specific paths; see README for the template
