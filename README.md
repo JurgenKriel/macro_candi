@@ -443,4 +443,4 @@ Stated plainly, because they affect how far the numbers can be trusted:
 
 ## License
 
-No license file is included yet — add one before sharing externally.
+[MIT](LICENSE) © 2026 Jurgen Kriel
