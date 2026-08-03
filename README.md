@@ -443,4 +443,11 @@ Stated plainly, because they affect how far the numbers can be trusted:
 
 ## License
 
-[MIT](LICENSE) © 2026 Jurgen Kriel
+[GNU General Public License v3.0](LICENSE) © 2026 Jurgen Kriel.
+
+This is a **copyleft** licence: you may use, modify and redistribute this code, but any
+distributed derivative work must also be released under the GPL-3.0. Chosen deliberately —
+the work is tied to an unpublished study, and copyleft keeps derivatives open rather than
+allowing the methods to be absorbed into closed or commercial software.
+
+If you use this pipeline in published work, please cite it (see `CITATION.cff`).

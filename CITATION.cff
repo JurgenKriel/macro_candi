@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "macro_candi: quantitative analysis of Candida-macrophage lattice light-sheet timelapses"
+abstract: >-
+  A Python/SLURM image-analysis pipeline for live 3D lattice light-sheet imaging of
+  Candida-macrophage host-pathogen interaction. Converts Zeiss CZI acquisitions to
+  OME-Zarr, performs 3D Cellpose-SAM segmentation of macrophages and Candida, quantifies
+  engulfment/entrapment via 3D containment, and measures hyphal network growth from
+  skeleton graphs with per-object tracking.
+authors:
+  - family-names: Kriel
+    given-names: Jurgen
+    email: krielj@gmail.com
+repository-code: "https://github.com/JurgenKriel/macro_candi"
+license: GPL-3.0-or-later
+version: "0.1.0"
+date-released: "2026-07-26"
+keywords:
+  - lattice light-sheet microscopy
+  - Candida albicans
+  - macrophage
+  - phagocytosis
+  - image segmentation
+  - hyphal growth
