@@ -30,6 +30,7 @@ from typing import Optional
 import numpy as np
 
 from canmac.io.atomic import atomic_write_text, write_done
+from canmac.io.manifest import add_cli_args, resolve_cli
 
 _LOG = logging.getLogger(__name__)
 
@@ -188,15 +189,19 @@ def finalize(dataset: str, out_dir: str = "results/{roi}", min_frames: int = 3,
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="Link 2D hyphal objects across time -> per-object growth trajectories (PROPOSED).")
-    ap.add_argument("--dataset", default="ROI2", choices=["ROI2", "ROI7"])
     ap.add_argument("--min-iou", type=float, default=0.1, dest="min_iou",
                     help="Minimum IoU with the previous frame to continue a track.")
     ap.add_argument("--min-frames", type=int, default=3, dest="min_frames",
                     help="Only plot/fit tracks seen in at least this many frames.")
     ap.add_argument("--t-start", type=int, default=0, dest="t_start")
-    ap.add_argument("--t-stop", type=int, default=120, dest="t_stop")
+    ap.add_argument("--t-stop", type=int, default=None, dest="t_stop",
+                    help="Stop before this timepoint (default: the dataset's T).")
     ap.add_argument("--out-dir", default="results/{roi}", dest="out_dir")
+    add_cli_args(ap)
     args = ap.parse_args()
+    record = resolve_cli(ap, args)
+    if args.t_stop is None:
+        args.t_stop = record["dims"]["T"]
 
     out = finalize(args.dataset, args.out_dir, min_frames=args.min_frames,
                    t_start=args.t_start, t_stop=args.t_stop, min_iou=args.min_iou)

@@ -92,6 +92,12 @@ pixi run python -m canmac.stages.segment --dataset ROI2 --finalize
 - [ ] For *Candida*, masks follow the filaments without large halos. This is the known weak
       point; see [Known limitations](../help/limitations.md).
 
+??? info "CPU `classical` backend (demo and CI only)"
+    A params file with `"method": "classical"` skips Cellpose and runs a CPU
+    smooth → Otsu → fill-holes → label pipeline (`classical_segment` in
+    `canmac/stages/segment.py`). It exists so the [demo](../getting-started/demo.md) and CI
+    run without a GPU. On real data it merges touching cells, so don't use it for results.
+
 ??? info "Experimental: micro-sam for *Candida*"
     `microsam_env/` holds a separate pixi environment and SLURM script for trying
     [micro-sam](https://github.com/computational-cell-analytics/micro-sam) on the pathogen

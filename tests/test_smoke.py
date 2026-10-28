@@ -16,6 +16,8 @@ import pytest
 
 def test_full_stack_imports():
     """Every core + later-phase library imports with no dependency conflict."""
+    # The lightweight CI env (requirements-ci.txt) has no torch/napari; the pixi env does.
+    pytest.importorskip("torch", reason="full pixi stack not installed (lightweight CI env)")
     import torch  # noqa: F401
     import zarr  # noqa: F401
     import dask  # noqa: F401

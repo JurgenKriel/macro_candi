@@ -1,8 +1,7 @@
-"""Phase-1 ingest orchestrator — emit all sidecars for both datasets (D-07/D-08).
+"""Phase-1 ingest orchestrator — emit all sidecars for every manifest dataset (D-07/D-08).
 
-For each of the EXACTLY 2 manifest datasets (ROI2, ROI7 — D-01; this loops
-datasets and timepoints, never the buggy per-FOV subunit count the parent
-pipeline miscounted — D-02) this stage:
+For each dataset in the manifest (it loops datasets and timepoints, never the
+buggy per-FOV subunit count the parent pipeline miscounted — D-02) this stage:
 
 1. emits ``results/{roi}/calibration.json`` (:func:`canmac.stages.calibrate.emit_calibration`);
 2. per channel (candida, macrophage) computes per-(t,channel) foreground bleach
@@ -40,8 +39,8 @@ from canmac.io.bleach import (  # noqa: E402
     save_bleach,
     should_apply,
 )
-from canmac.io.manifest import datasets  # noqa: E402
-from canmac.io.metadata import timestamps_s  # noqa: E402
+from canmac.io.manifest import datasets, use_manifest  # noqa: E402
+from canmac.io.metadata import spatial_um, timestamps_s  # noqa: E402
 from canmac.stages.calibrate import emit_calibration  # noqa: E402
 
 
@@ -141,16 +140,26 @@ def process_dataset(record: dict, out_dir: str = "results/{roi}") -> None:
     dataset = record["id"]
     zattrs_path, ome_xml_path = _paths_for(record)
 
-    cal_path = emit_calibration(dataset, zattrs_path, ome_xml_path, out_dir=out_dir)
+    n_t = record["dims"]["T"]
+    cal_path = emit_calibration(dataset, zattrs_path, ome_xml_path, out_dir=out_dir,
+                                expected_n=n_t)
     print(f"[{dataset}] calibration -> {cal_path}")
+    declared = record.get("voxel_um")
+    if declared is not None:
+        on_disk = spatial_um(zattrs_path)["voxel_um"]
+        if abs(float(declared) - on_disk) > 1e-4:
+            raise ValueError(
+                f"{dataset}: manifest voxel_um={declared} disagrees with the store's NGFF "
+                f"scale {on_disk} um"
+            )
 
-    timestamps = timestamps_s(ome_xml_path)["timestamps_s"]
+    timestamps = timestamps_s(ome_xml_path, expected_n=n_t)["timestamps_s"]
 
     for channel in CHANNELS:
         res: dict[str, Any] = compute_bleach_factors(dataset, channel)
         factors = res["factors"]
         S_raw = res["S_raw"]
-        applied = should_apply(channel)  # 01-04 policy: macrophage True, candida False
+        applied = should_apply(channel, record)  # manifest bleach_correct, else 01-04 policy
         save_bleach(
             dataset,
             channel,
@@ -159,7 +168,7 @@ def process_dataset(record: dict, out_dir: str = "results/{roi}") -> None:
             method=res["method"],
             ref=res["ref"],
             apply=applied,
-            reason=apply_reason(channel),
+            reason=apply_reason(channel, record),
             out_dir=out_dir,
         )
         S = [S_raw[t] for t in range(res["n_t"])]
@@ -184,8 +193,9 @@ def main() -> None:
         "--out-dir", default="results/{roi}", help="Output dir template (default: results/{roi})."
     )
     args = parser.parse_args()
+    use_manifest(args.manifest)  # every get_view() below reads this same manifest
 
-    for record in datasets(args.manifest):  # loops the 2 datasets — NEVER scenes (D-02)
+    for record in datasets(args.manifest):  # loops datasets — NEVER scenes (D-02)
         process_dataset(record, out_dir=args.out_dir)
 
 

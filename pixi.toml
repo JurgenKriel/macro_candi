@@ -36,3 +36,5 @@ XDG_CACHE_HOME = "/vast/scratch/users/kriel.j/.cache"
 
 [tasks]
 smoke = "python -c \"import torch,zarr,dask,ome_zarr,skimage,skan,napari,cellpose,networkx; assert torch.cuda.is_available(), 'CUDA not available'; print('OK', torch.version.cuda)\""
+test = "pytest tests -m 'not gpu'"
+demo = "bash scripts/demo/run_demo.sh"   # synthetic dataset end-to-end on the CPU (~2 min), scored vs ground truth

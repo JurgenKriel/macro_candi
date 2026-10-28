@@ -3,6 +3,10 @@
 Setting up macro_candi on a new cluster takes three steps. Do them in order: each one
 checks the one before it.
 
+!!! tip "Want to see it work first?"
+    [Try the demo](demo.md): the whole pipeline on a synthetic dataset, CPU only, about
+    2 minutes, with a pass/fail scorecard against the known answer.
+
 <div class="grid cards" markdown>
 
 -   :material-numeric-1-circle:{ .lg } **[Install](installation.md)**

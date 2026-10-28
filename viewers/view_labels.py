@@ -55,18 +55,15 @@ def _load_labels(dataset: str, channel: str, t: int, store: str = None):
 
 
 def _voxel_um(dataset: str) -> float:
-    """Isotropic voxel size (µm) from the manifest — for physical-unit napari scale."""
-    try:
-        from canmac.io.manifest import get
+    """Isotropic voxel size (µm) from the store's NGFF scale — for physical-unit napari scale."""
+    from canmac.io.reader import voxel_um
 
-        return float(get(dataset)["voxel_um"])
-    except Exception:
-        return 0.14499219272808386  # known ROI2/ROI7 isotropic voxel
+    return voxel_um(dataset)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="View a segmentation timepoint in napari.")
-    ap.add_argument("dataset", choices=["ROI2", "ROI7"])
+    ap.add_argument("dataset", help="Dataset id from the manifest.")
     ap.add_argument("channel", choices=["macrophage", "candida"])
     ap.add_argument("t", type=int, help="Timepoint index (e.g. 100).")
     ap.add_argument("--store", default=None,

@@ -13,7 +13,8 @@ Turn live 3D lattice light-sheet movies of <em>Candida</em> meeting macrophages 
 numbers you can check: who got engulfed, when, and how fast the hyphae grew.
 </p>
 
-[Get started :material-arrow-right:](getting-started/index.md){ .md-button .md-button--primary }
+[Try the 2-minute demo :material-play:](getting-started/demo.md){ .md-button .md-button--primary }
+[Get started](getting-started/index.md){ .md-button }
 [How it works](concepts/index.md){ .md-button }
 [View on GitHub :fontawesome-brands-github:](https://github.com/JurgenKriel/macro_candi){ .md-button }
 
@@ -87,16 +88,16 @@ You will get the most out of macro_candi if:
 - [x] you have access to a **Linux cluster with SLURM** and an **NVIDIA GPU with at least 16 GB** of memory;
 - [x] you are comfortable running commands in a terminal and editing a YAML file.
 
-!!! info "Current scope"
-    The code was developed against two reference datasets (`ROI2`, `ROI7`: T=120, C=3,
-    Z=301, isotropic 0.145 µm voxels, ~3 min/frame). Some dataset names and dimensions are
-    still fixed in the code. See [Adapting to your own data](pipeline/02-manifest.md#adapting-to-your-own-data)
-    before planning a new experiment around it.
+!!! tip "No data or GPU yet?"
+    `pixi run demo` generates a synthetic timelapse with a known answer, runs every stage on
+    the CPU, and scores the result, all in about two minutes.
+    [Try the demo →](getting-started/demo.md)
 
 ## Where to go next
 
 | I want to… | Read |
 |---|---|
+| See it work before installing anything big | [Try the demo](getting-started/demo.md) |
 | Install it on a cluster | [Installation](getting-started/installation.md) |
 | Run it end to end once | [Your first run](getting-started/first-run.md) |
 | Understand the method before I trust it | [How it works](concepts/index.md) |

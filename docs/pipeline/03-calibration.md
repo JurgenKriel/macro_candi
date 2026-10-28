@@ -51,13 +51,17 @@ In the reference experiment, macrophages bleach (**corrected**) and *Candida* ri
 grows (**not corrected**). Correcting the *Candida* channel would divide the growth signal
 away.
 
-To change the policy, edit `APPLY_POLICY` in `canmac/io/bleach.py` and re-run this stage.
-The decision and its reason are written into `bleach.json`.
+To change the policy for a dataset, set it in the manifest and re-run this stage:
 
-!!! note
-    Segmentation also reads the macrophage channel corrected and the *Candida* channel raw
-    (`correct=(channel == "macrophage")` in `canmac/stages/segment.py`). If you change the
-    policy, check that line as well.
+```yaml
+    bleach_correct:
+      macrophage: true
+      candida: false
+```
+
+Without `bleach_correct`, the default above applies (`APPLY_POLICY` in
+`canmac/io/bleach.py`). The decision and its reason are written into `bleach.json`, and
+segmentation and the hyphal projections read each channel according to the same policy.
 
 ## Check it
 

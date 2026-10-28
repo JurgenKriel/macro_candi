@@ -56,9 +56,20 @@ attached.
 
 ## Data & results
 
-??? failure "`ValueError: expected exactly 2 datasets` / `expected dataset ids {'ROI2', 'ROI7'}`"
-    The manifest validator currently requires both reference datasets. See
-    [Adapting to your own data](../pipeline/02-manifest.md#adapting-to-your-own-data).
+??? failure "`manifest not found: …/manifest.yaml`"
+    Copy `manifest.example.yaml` to `manifest.yaml` and edit it, or point
+    `CANMAC_MANIFEST` (or `--manifest`) at your manifest. See
+    [Stage 2](../pipeline/02-manifest.md#using-more-than-one-manifest).
+
+??? failure "`--dataset is required: the manifest lists [...]` / `unknown dataset id`"
+    The manifest lists several datasets, or not the one you named. Pass
+    `--dataset <id>` with one of the ids printed in the message. Check `CANMAC_MANIFEST`
+    points where you think it does.
+
+??? failure "`expected N timestamps, got M`"
+    The OME-XML has a different number of timepoints than `dims.T` in the manifest. The
+    conversion may have been interrupted. Re-check the store's `.zarray` shape and
+    re-convert if needed.
 
 ??? failure "`dims.Y=… disagrees with on-disk .zarray Y=…`"
     The manifest's `dims` don't match the array. Read the true shape from

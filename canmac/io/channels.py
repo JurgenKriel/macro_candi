@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Union
+from typing import Iterable, Mapping, Optional, Union
 
 # Target colors, resolved against omero.channels[*].color (case-insensitive).
 COLORS = {
@@ -32,18 +32,24 @@ def _load_channels(zattrs_path: Union[str, Path]) -> list[dict]:
         return json.load(f)["omero"]["channels"]
 
 
-def resolve_channel(zattrs_path: Union[str, Path], which: str) -> int:
+def resolve_channel(
+    zattrs_path: Union[str, Path], which: str, colors: Optional[Mapping[str, str]] = None
+) -> int:
     """Return the C-axis index whose omero color matches ``which``.
+
+    ``colors`` maps role -> hex (normally the manifest's ``channels`` block); it
+    defaults to the reference-experiment ``COLORS``.
 
     ``which`` is one of ``COLORS`` ("candida", "macrophage"). Matching is by
     color hex (case-insensitive), never by index. Raises ``ValueError`` if the
     target color is absent or appears more than once (fail loud — never silently
     default to index 0).
     """
-    if which not in COLORS:
-        raise ValueError(f"unknown channel {which!r}; expected one of {sorted(COLORS)}")
+    colors = COLORS if colors is None else colors
+    if which not in colors:
+        raise ValueError(f"unknown channel {which!r}; expected one of {sorted(colors)}")
     omero = _load_channels(zattrs_path)
-    target = COLORS[which]
+    target = str(colors[which]).upper()
     hits = [i for i, c in enumerate(omero) if c["color"].upper() == target]
     if len(hits) != 1:
         raise ValueError(
@@ -53,10 +59,13 @@ def resolve_channel(zattrs_path: Union[str, Path], which: str) -> int:
     return hits[0]
 
 
-def discard_indices(zattrs_path: Union[str, Path]) -> list[int]:
+def discard_indices(
+    zattrs_path: Union[str, Path], discard: Optional[Iterable[str]] = None
+) -> list[int]:
     """Return the indices whose color is in ``DISCARD`` (lysed channels).
 
     Callers can use this to assert the lysed channel is excluded from any read.
     """
     omero = _load_channels(zattrs_path)
-    return [i for i, c in enumerate(omero) if c["color"].upper() in DISCARD]
+    drop = DISCARD if discard is None else {str(c).upper() for c in discard}
+    return [i for i, c in enumerate(omero) if c["color"].upper() in drop]

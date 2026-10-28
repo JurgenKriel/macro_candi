@@ -1,0 +1,45 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["docs/**", "mkdocs.yml", "**.md"]
+  pull_request:
+    paths-ignore: ["docs/**", "mkdocs.yml", "**.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      - run: pip install -r requirements-ci.txt
+
+      # Unit tests + synthetic-data tests; reference-data and GPU tests skip/deselect.
+      - run: python -m pytest tests -m "not gpu" -ra
+
+      # Whole pipeline on the synthetic dataset, scored against its ground truth.
+      - run: bash scripts/demo/run_demo.sh
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-results
+          path: |
+            results/DEMO/*.csv
+            results/DEMO/*.json
+            results/DEMO/qc/*.png
+          if-no-files-found: ignore

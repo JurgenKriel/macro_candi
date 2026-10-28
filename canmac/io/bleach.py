@@ -62,17 +62,25 @@ APPLY_POLICY: dict[str, dict[str, Any]] = {
 }
 
 
-def should_apply(channel: str) -> bool:
-    """Whether the stored bleach factor is APPLIED on read for ``channel`` (:data:`APPLY_POLICY`).
+def should_apply(channel: str, record: Optional[dict] = None) -> bool:
+    """Whether the stored bleach factor is APPLIED on read for ``channel``.
 
+    A manifest ``record`` carrying ``bleach_correct: {channel: bool}`` wins (it is a
+    per-experiment scientific decision); otherwise :data:`APPLY_POLICY` applies.
     Unknown channels default to ``True`` (correct) — known channels follow the
     checkpoint-decided policy (macrophage True, candida False).
     """
+    override = (record or {}).get("bleach_correct") or {}
+    if channel in override:
+        return bool(override[channel])
     return bool(APPLY_POLICY.get(channel, {}).get("apply", True))
 
 
-def apply_reason(channel: str) -> str:
+def apply_reason(channel: str, record: Optional[dict] = None) -> str:
     """Human-readable reason for the :func:`should_apply` policy of ``channel``."""
+    override = (record or {}).get("bleach_correct") or {}
+    if channel in override:
+        return f"set in manifest (bleach_correct.{channel}: {str(bool(override[channel])).lower()})"
     return str(APPLY_POLICY.get(channel, {}).get("reason", ""))
 
 

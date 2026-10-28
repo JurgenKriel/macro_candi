@@ -53,6 +53,19 @@ def _level0(dataset_id: str):
     return arr, rec
 
 
+def voxel_um(dataset: str) -> float:
+    """Isotropic voxel edge (um) from the store's NGFF scale (authoritative; D-05)."""
+    from .metadata import spatial_um
+
+    rec = get_dataset(dataset)
+    return float(spatial_um(f"{_store_path(rec)}/0/.zattrs")["voxel_um"])
+
+
+def ome_xml_path(dataset: str) -> str:
+    """Path to the store's ``OME/METADATA.ome.xml`` (per-plane DeltaT timestamps)."""
+    return f"{_store_path(get_dataset(dataset))}/OME/METADATA.ome.xml"
+
+
 def get_view(dataset: str, channel: str, t: Optional[int] = None, correct: bool = False):
     """Return a lazy, color-selected dask array for ``dataset``/``channel``.
 
@@ -80,7 +93,7 @@ def get_view(dataset: str, channel: str, t: Optional[int] = None, correct: bool 
     """
     arr, rec = _level0(dataset)
     zattrs = f"{_store_path(rec)}/0/.zattrs"
-    c = resolve_channel(zattrs, channel)          # color-resolved C index, never lysed
+    c = resolve_channel(zattrs, channel, rec["channels"])  # manifest colour -> C index, never lysed
     view = arr[:, c] if t is None else arr[t, c]  # lazy (T,Z,Y,X) or (Z,Y,X)
     if not correct:
         return view                                # STILL LAZY — caller materializes one t

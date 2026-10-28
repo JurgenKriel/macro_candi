@@ -31,6 +31,7 @@ from typing import Optional
 import numpy as np
 
 from canmac.io.atomic import atomic_write_json, atomic_write_text, write_done
+from canmac.io.manifest import add_cli_args, resolve_cli
 
 _LOG = logging.getLogger(__name__)
 
@@ -39,12 +40,15 @@ def mip(dataset: str, channel: str, t: int) -> np.ndarray:
     """Max-intensity projection over Z of ONE timepoint (streamed; never the 4D array)."""
     from canmac.io.reader import get_view
 
-    correct = channel == "macrophage"  # D-05: candida read RAW (its rise is growth)
+    from canmac.io.bleach import should_apply
+    from canmac.io.manifest import get as get_dataset
+
+    correct = should_apply(channel, get_dataset(dataset))  # D-05: candida RAW by default
     vol = get_view(dataset, channel, t, correct=correct)
     return np.ascontiguousarray(vol.max(axis=0).compute()).astype(np.float32)
 
 
-def build_mip(dataset: str, channel: str = "candida", t_start: int = 0, t_stop: int = 120,
+def build_mip(dataset: str, channel: str = "candida", t_start: int = 0, t_stop: Optional[int] = None,
               out_dir: str = "results/{roi}") -> str:
     """Build the MIP timelapse ONCE as a saved artifact: ``{out_dir}/{channel}_mip.zarr``.
 
@@ -56,6 +60,10 @@ def build_mip(dataset: str, channel: str = "candida", t_start: int = 0, t_stop: 
 
     from canmac.io.atomic import is_done, write_done
 
+    if t_stop is None:
+        from canmac.io.manifest import n_timepoints
+
+        t_stop = n_timepoints(dataset)
     resolved = out_dir.format(roi=dataset) if "{roi}" in out_dir else out_dir
     store = f"{resolved}/{channel}_mip.zarr"
     root = zarr.open_group(store, mode="a")
@@ -343,8 +351,8 @@ def finalize(dataset: str, out_dir: str = "results/{roi}", timestamps: bool = Tr
     if timestamps:
         try:
             from canmac.io.metadata import timestamps_s
-            ts = timestamps_s(f"{dataset}/raw.zarr/OME/METADATA.ome.xml")
-            vals = next(v for v in ts.values() if isinstance(v, (list, tuple)))
+            from canmac.io.reader import ome_xml_path
+            vals = timestamps_s(ome_xml_path(dataset))["timestamps_s"]
             df["hours"] = [float(vals[int(t)]) / 3600.0 for t in df["t"]]
         except Exception as e:  # pragma: no cover
             _LOG.warning("timestamps unavailable (%s) — falling back to frame index", e)
@@ -383,12 +391,12 @@ def finalize(dataset: str, out_dir: str = "results/{roi}", timestamps: bool = Tr
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="Phase-6 PoC: 2D MIP hyphal skeleton metrics over the timelapse (PROPOSED).")
-    ap.add_argument("--dataset", default="ROI2", choices=["ROI2", "ROI7"])
     ap.add_argument("--t", type=int, default=None, help="Single timepoint.")
     ap.add_argument("--t-start", type=int, default=0, dest="t_start")
-    ap.add_argument("--t-stop", type=int, default=120, dest="t_stop")
+    ap.add_argument("--t-stop", type=int, default=None, dest="t_stop",
+                    help="Stop before this timepoint (default: the dataset's T).")
     ap.add_argument("--all-t", action="store_true", dest="all_t",
-                    help="Sweep --t-start..--t-stop (default full 120).")
+                    help="Sweep --t-start..--t-stop (default: every timepoint).")
     ap.add_argument("--normalize", default="localstd", choices=["none", "localstd", "clahe"])
     ap.add_argument("--norm-sigma", type=float, default=12.0, dest="norm_sigma")
     ap.add_argument("--norm-mask-percentile", type=float, default=98.0, dest="norm_mask_percentile")
@@ -401,7 +409,11 @@ def main() -> None:
     ap.add_argument("--method", default="cellsam", choices=["cellsam", "threshold"],
                     help="cellsam = Cellpose-SAM 2D per frame (default); threshold = Otsu.")
     ap.add_argument("--finalize", action="store_true")
+    add_cli_args(ap)
     args = ap.parse_args()
+    record = resolve_cli(ap, args)
+    if args.t_stop is None:
+        args.t_stop = record["dims"]["T"]
 
     if args.build_mip:
         store = build_mip(args.dataset, "candida", args.t_start, args.t_stop, args.out_dir)
@@ -412,7 +424,7 @@ def main() -> None:
         return
 
     seg_kw = dict(method=args.method, params=None) if args.method == "cellsam" else dict(
-        normalize=args.normalize, norm_sigma=args.norm_sigma,
+        method=args.method, normalize=args.normalize, norm_sigma=args.norm_sigma,
                   norm_mask_percentile=args.norm_mask_percentile,
                   min_size=args.min_size, closing=args.closing)
     if args.method == "cellsam":
@@ -422,8 +434,12 @@ def main() -> None:
     ts = range(args.t_start, args.t_stop) if args.all_t else ([args.t] if args.t is not None else [])
     if not ts:
         ap.error("give --t N, or --all-t, or --finalize")
+    from canmac.io.reader import voxel_um
+
+    vox = voxel_um(args.dataset)  # from the store's NGFF scale, never assumed
     for t in ts:
-        m = process_timepoint(args.dataset, t, args.out_dir, qc=not args.no_qc, **seg_kw)
+        m = process_timepoint(args.dataset, t, args.out_dir, vox_um=vox,
+                              qc=not args.no_qc, **seg_kw)
         print(f"t{t:03d}: {m['n_objects']} objects | total={m['total_length_um']:.1f}um "
               f"mean/obj={m['mean_length_um']:.1f}um longest={m['max_length_um']:.1f}um "
               f"tips={m['n_tips']} junctions={m['n_junctions']}")
