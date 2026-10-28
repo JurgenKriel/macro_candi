@@ -20,3 +20,6 @@ models/          # pre-staged model weights (GB-scale)
 # --- site-local ---
 config.local.sh
 manifest.yaml    # site-specific paths; see README for the template
+
+# --- docs build output ---
+site/

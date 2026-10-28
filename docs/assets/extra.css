@@ -1,0 +1,42 @@
+/* Small additions on top of Material — keep this file short. */
+
+.mc-hero {
+  padding: 1.5rem 0 0.5rem;
+}
+.mc-hero h1 {
+  margin-bottom: 0.4rem;
+  font-weight: 700;
+}
+.mc-hero p.mc-tagline {
+  font-size: 1.15rem;
+  max-width: 44rem;
+  color: var(--md-default-fg-color--light);
+  margin-top: 0;
+}
+.mc-hero .md-button {
+  margin: 0.25rem 0.4rem 0.25rem 0;
+}
+
+/* Stage badge used at the top of each pipeline page. */
+.mc-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: -0.4rem 0 1.2rem;
+}
+.mc-meta span {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 1rem;
+  background: var(--md-code-bg-color);
+  color: var(--md-default-fg-color--light);
+  white-space: nowrap;
+}
+.mc-meta span strong {
+  color: var(--md-default-fg-color);
+}
+
+/* Keep wide reference tables readable on small screens. */
+.md-typeset table:not([class]) {
+  font-size: 0.72rem;
+}
