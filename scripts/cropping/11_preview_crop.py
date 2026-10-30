@@ -23,9 +23,10 @@ at. Omitted bounds default to the full extent of that axis.
 
 Reading positions: the overlay in the top-left of the viewer shows the cursor in LEVEL-0
 voxels (napari's own status bar shows pixel indices of the previewed layer, which are
-NOT the numbers the cropper wants). In 2D mode, press 1 over one corner of the box you
-want and 2 over the opposite corner (scroll Z in between for a Z range); the matching
---x0 ... --z1 flags are printed in the terminal, ready to paste.
+NOT the numbers the cropper wants). In 2D mode, press J over one corner of the box you
+want and K over the opposite corner (scroll Z in between for a Z range); the box is drawn
+in yellow and the matching --x0 ... --z1 flags are printed in the terminal, ready to paste.
+(Not 1 / 2: napari binds those to the image layer's pan-zoom / transform modes.)
 
 Relative --store paths are resolved against the directory you run the command from.
 
@@ -181,7 +182,7 @@ def box_flags(box: dict) -> str:
 def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
                 title: str = "ROI preview", show: bool = True):
     """Build the napari viewer: one layer per channel, a live level-0 cursor readout and
-    two-key corner picking (1 / 2) that prints ready-to-paste crop flags.
+    two-key corner picking (J / K) that draws the box and prints ready-to-paste crop flags.
 
     Layers carry ``scale`` (um/voxel at the previewed level) and ``translate`` (the box's
     offset in um), so napari WORLD coordinates are absolute micrometres in the whole
@@ -201,10 +202,12 @@ def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
             except (ValueError, IndexError):
                 pass
         v.add_image(sub[i], name=f"{label}", scale=nap_scale,
-                    translate=nap_translate, blending="additive", rendering="mip", **kw)
-    v.scale_bar.visible = True
-    v.scale_bar.unit = "um"
+                    translate=nap_translate, blending="additive", rendering="mip",
+                    units=("um",) * len(nap_scale), **kw)
+    v.scale_bar.visible = True  # reads um from the layers' units (scale_bar.unit is a no-op)
+    v.dims.axis_labels = ("z", "y", "x")
     v.axes.visible = True
+    v.axes.labels = True
 
     picked: dict = {}
 
@@ -214,6 +217,7 @@ def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
                 for k, d in enumerate("zyx")}
 
     def refresh(*_):
+        v.axes.visible = v.dims.ndisplay == 3  # in 2D the axes sit on top of this overlay
         c = cursor_vox0()
         lines = [f"cursor (level-0 voxels)   x {c['x']}   y {c['y']}   z {c['z']}"]
         if v.dims.ndisplay == 3:
@@ -225,7 +229,7 @@ def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
         if len(picked) == 2:
             lines.append(box_flags(corners_to_box(picked["1"], picked["2"], extent)))
         else:
-            lines.append("press 1 / 2 to mark opposite corners of the crop box")
+            lines.append("press J / K to mark opposite corners of the crop box")
         v.text_overlay.text = "\n".join(lines)
 
     def pick(key: str):
@@ -235,10 +239,26 @@ def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
         if len(picked) == 2:
             flags = box_flags(corners_to_box(picked["1"], picked["2"], extent))
             print(f"\ncrop box flags:\n  {flags}\n")
+            show_box(corners_to_box(picked["1"], picked["2"], extent))
         refresh()
 
-    v.bind_key("1", lambda _v: pick("1"), overwrite=True)
-    v.bind_key("2", lambda _v: pick("2"), overwrite=True)
+    def show_box(box: dict):
+        """Outline the picked box in Y/X (drawn on every Z slice) as a yellow rectangle."""
+        # voxel i covers [i - 0.5, i + 0.5) * um in world space, so edges sit between voxels
+        rect = [[(box["y"][0] - 0.5) * um["y"], (box["x"][0] - 0.5) * um["x"]],
+                [(box["y"][1] - 0.5) * um["y"], (box["x"][1] - 0.5) * um["x"]]]
+        if "crop box" in v.layers:
+            v.layers["crop box"].data = [rect]
+        else:
+            v.add_shapes([rect], shape_type="rectangle", name="crop box", ndim=2,
+                         edge_color="yellow", face_color="transparent",
+                         edge_width=2 * um["x"], units=("um", "um"))
+            v.layers.selection.active = v.layers[0]  # shapes-layer keys stay out of the way
+
+    # J / K, not 1 / 2: the active layer's keymap wins over the viewer's, and napari
+    # binds 1 / 2 on image layers to pan-zoom / transform mode.
+    v.bind_key("j", lambda _v: pick("1"), overwrite=True)
+    v.bind_key("k", lambda _v: pick("2"), overwrite=True)
     v.mouse_move_callbacks.append(refresh)
     v.dims.events.ndisplay.connect(refresh)
     v.text_overlay.visible = True
@@ -336,8 +356,8 @@ def main() -> None:
                     {d: axis_len(axes, shape0, d) for d in "zyx"},
                     title=f"ROI preview  L{args.level}  t{args.t}")
     print("\nIn the viewer: switch to 2D (bottom-left 2D/3D button), move the Z slider,")
-    print("and the top-left overlay shows the cursor in LEVEL-0 voxels. Press 1 on one")
-    print("corner and 2 on the opposite corner (on different Z slices for a Z range) and the")
+    print("and the top-left overlay shows the cursor in LEVEL-0 voxels. Press J on one")
+    print("corner and K on the opposite corner (on different Z slices for a Z range) and the")
     print("crop flags are printed here, ready to paste. Then: 12_crop_roi.py ... --dry-run")
     import napari
 

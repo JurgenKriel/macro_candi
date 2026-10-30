@@ -26,7 +26,7 @@ excerpt.
 
 ```mermaid
 flowchart LR
-    a["Open preview<br/>(coarse level)"] --> b["Pick corners<br/>press 1 / 2"]
+    a["Open preview<br/>(coarse level)"] --> b["Pick corners<br/>press J / K"]
     b --> c["Re-open preview<br/>with the box"]
     c -->|not right| b
     c -->|looks good| d["Size check<br/>fits under 4 GiB?"]
@@ -80,6 +80,13 @@ pixi run python scripts/cropping/11_preview_crop.py 0
 opens with one layer per channel (*Candida* in red, macrophages in green) shown as a maximum
 intensity projection in 3D.
 
+<figure markdown="span">
+  ![napari preview window showing the whole demo volume in 3D: layer controls and layer list on the left, green macrophages and red Candida on the canvas, and a text overlay in the top-left corner](../assets/cropping/01-overview-3d.png){ loading=lazy }
+  <figcaption>What opens: layer controls (top-left panel), one layer per channel (layer list),
+  and the <b>cursor overlay</b> (top-left of the canvas) that reports positions in level-0
+  voxels. In 3D it reminds you to switch to 2D before picking corners.</figcaption>
+</figure>
+
 The terminal shows a summary first. This is real output from the demo store:
 
 ```text
@@ -123,24 +130,44 @@ Reading positions:
 - Ignore napari's own status bar at the bottom. It shows pixel indices of the *previewed*
   layer (downsampled and offset by the box), which are not the numbers the cropper wants.
 
+<figure markdown="span">
+  ![napari in 2D mode: a single Z slice with three green macrophages and red Candida hyphae; the Z slider is under the canvas and the overlay reads cursor x 33, y 34, z 25](../assets/cropping/02-slice-2d.png){ loading=lazy }
+  <figcaption>2D mode: one Z slice at a time, chosen with the <b>z slider</b> under the canvas.
+  The overlay shows the voxel under the mouse (here x 33, y 34 on slice z 25).</figcaption>
+</figure>
+
 To pick a box:
 
 1. Switch to **2D** (in 3D, the cursor depth is ambiguous and the overlay warns you).
-2. Scroll to a Z slice at one end of the region and hover over one corner. Press ++1++.
-3. Scroll to the other end in Z, hover over the opposite corner and press ++2++.
-4. The terminal prints the flags, ready to copy:
+2. Scroll to a Z slice at one end of the region and hover over one corner. Press ++j++.
+3. Scroll to the other end in Z, hover over the opposite corner and press ++k++.
+4. A **yellow rectangle** shows the box in X/Y on every slice, the overlay lists both corners
+   and the flags, and the terminal prints the flags ready to copy:
 
     ```text
-    corner 1: x 30  y 15  z 5   (level-0 voxels)
-    corner 2: x 99  y 49  z 20   (level-0 voxels)
+    corner 1: x 10  y 12  z 8   (level-0 voxels)
+    corner 2: x 89  y 79  z 41   (level-0 voxels)
 
     crop box flags:
-      --x0 30 --x1 100 --y0 15 --y1 50 --z0 5 --z1 21
+      --x0 10 --x1 90 --y0 12 --y1 80 --z0 8 --z1 42
     ```
 
     The corners can be picked in any order. The stop values are one past the corner you
-    marked, so the corner voxels are inside the box. Press ++1++ or ++2++ again to re-pick
-    a corner.
+    marked, so the corner voxels are inside the box. Press ++j++ or ++k++ again to re-pick
+    a corner; the rectangle follows.
+
+<figure markdown="span">
+  ![napari in 2D after picking both corners: a yellow rectangle around the top-left macrophage and the branching hypha, a "crop box" layer in the layer list, and the overlay listing corner 1, corner 2 and the crop flags](../assets/cropping/03-pick-corners-2d.png){ loading=lazy }
+  <figcaption>After ++j++ on (x 10, y 12, z 8) and ++k++ on (x 89, y 79, z 41): the box is
+  drawn in yellow (its own <code>crop box</code> layer; hide it with the eye icon), and the last
+  overlay line is exactly what to paste into the next command.</figcaption>
+</figure>
+
+!!! warning "Why J and K, not 1 and 2?"
+    napari reserves ++1++ / ++2++ for an image layer's *pan/zoom* and *transform* modes. In
+    transform mode, dragging **moves the layer**, which would shift every coordinate you read.
+    If the layer-controls tool icons (top of the panel) show the transform tool selected,
+    press ++1++ to return to pan/zoom.
 
 !!! tip "Want the full depth?"
     Pick both corners on the same Z slice and then delete `--z0`/`--z1` from the flags.
@@ -151,7 +178,7 @@ To pick a box:
 Close the viewer and re-open it with the flags you just copied:
 
 ```bash
-pixi run python scripts/cropping/11_preview_crop.py 0 --x0 30 --x1 100 --y0 15 --y1 50 --z0 5 --z1 21
+pixi run python scripts/cropping/11_preview_crop.py 0 --x0 10 --x1 90 --y0 12 --y1 80 --z0 8 --z1 42
 ```
 
 Now only the box is loaded, so you can afford a finer level. Try `--level 1`, or
@@ -159,7 +186,14 @@ Now only the box is loaded, so you can afford a finer level. Try `--level 1`, or
 position in the volume, so the overlay still reads level-0 voxels. Repeat steps 2–3 until
 the region looks right.
 
-Check another timepoint too (change `0` to, say, `40`). Cells move, so make sure the box
+<figure markdown="span">
+  ![napari 3D view of only the cropped box at full resolution: one macrophage containing a yeast, a hypha extending from it, and part of a second macrophage cut by the box edge](../assets/cropping/04-confirm-box-3d.png){ loading=lazy }
+  <figcaption>The same box re-opened at <code>--level 0</code>: only the region you will crop
+  is loaded. Here the box clips the right-hand macrophage. Widen <code>--x1</code> if you
+  want all of it.</figcaption>
+</figure>
+
+Check another timepoint too (change `0` to, say, `20`). Cells move, so make sure the box
 still covers what you care about over the time range you plan to crop.
 
 ### 4. Check that it fits in Blender
@@ -167,7 +201,7 @@ still covers what you care about over the time range you plan to crop.
 Read the **level 0** row of the size table, or run the size check without opening a window:
 
 ```bash
-pixi run python scripts/cropping/11_preview_crop.py 0 --x0 30 --x1 100 --y0 15 --y1 50 --check
+pixi run python scripts/cropping/11_preview_crop.py 0 --x0 10 --x1 90 --y0 12 --y1 80 --check
 ```
 
 Microscopy Nodes turns each channel at each timepoint into a 32-bit float volume, and
@@ -196,7 +230,7 @@ prints sizes and writes nothing:
 
 ```bash
 pixi run python scripts/cropping/12_crop_roi.py \
-    --x0 30 --x1 100 --y0 15 --y1 50 --z0 5 --z1 21 \
+    --x0 10 --x1 90 --y0 12 --y1 80 --z0 8 --z1 42 \
     --out crops/roi_a.zarr --dry-run
 ```
 
@@ -204,7 +238,7 @@ pixi run python scripts/cropping/12_crop_roi.py \
 t      : [0:1]  (1 timepoint(s))
 channel: 1:candida(FF0000), 2:macrophage(00FF00)
 ...
-cropping from level 0: 16 x 35 x 70 (z,y,x)  voxel (0.5, 0.5, 0.5) um
+cropping from level 0: 34 x 68 x 80 (z,y,x)  voxel (0.5, 0.5, 0.5) um
   as float32 VDB, per channel per timepoint : 0.00 GiB (fits)     # must say "fits"
   uint16 on disk, all channels/timepoints   : 0.00 GiB            # disk space needed
 ```
@@ -216,22 +250,22 @@ channels at this stage:
 
     ```bash
     pixi run python scripts/cropping/12_crop_roi.py \
-        --x0 30 --x1 100 --y0 15 --y1 50 --t0 40 --out crops/roi_a_t40.zarr
+        --x0 10 --x1 90 --y0 12 --y1 80 --t0 12 --out crops/roi_a_t12.zarr
     ```
 
 === "A stretch of timelapse"
 
     ```bash
-    # timepoints 0..39 (t1 is exclusive); Microscopy Nodes loads this as a sequence
+    # timepoints 0..19 (t1 is exclusive); Microscopy Nodes loads this as a sequence
     pixi run python scripts/cropping/12_crop_roi.py \
-        --x0 30 --x1 100 --y0 15 --y1 50 --t0 0 --t1 40 --out crops/roi_a.zarr
+        --x0 10 --x1 90 --y0 12 --y1 80 --t0 0 --t1 20 --out crops/roi_a.zarr
     ```
 
 === "One channel only"
 
     ```bash
     pixi run python scripts/cropping/12_crop_roi.py \
-        --x0 30 --x1 100 --y0 15 --y1 50 --channels candida --out crops/roi_a_candida.zarr
+        --x0 10 --x1 90 --y0 12 --y1 80 --channels candida --out crops/roi_a_candida.zarr
     ```
 
 The cropper needs no display, so long crops can run over SSH or in a batch job.
@@ -297,8 +331,8 @@ them from the `channel:` line of the summary.
 | `--include-lysed` | off | Also show the lysed-cell channel |
 | `--check` | off | Print the summary and size table only; no window |
 
-In the viewer: ++1++ / ++2++ mark opposite corners (2D mode); the top-left overlay shows the
-cursor in level-0 voxels.
+In the viewer: ++j++ / ++k++ mark opposite corners (2D mode) and draw the box in yellow; the
+top-left overlay shows the cursor in level-0 voxels.
 
 ### `12_crop_roi.py --out PATH`: crop (writes)
 
@@ -359,6 +393,17 @@ cursor in level-0 voxels.
 ??? question "The overlay numbers don't match the status bar"
     Expected. The status bar shows pixel indices of the displayed (possibly downsampled,
     offset) layer. Use the overlay or the printed flags, which are level-0 voxels.
+
+??? question "Pressing J / K does nothing"
+    The keys go to whichever part of the window has keyboard focus. Click once on the
+    canvas (the black image area) and try again; nothing is printed until the mouse is over
+    the canvas. If the overlay doesn't mention J / K at all, you are running an older copy of
+    `11_preview_crop.py`: update the repository.
+
+??? question "The image jumped / moves when I drag"
+    The layer is in *transform* mode (napari's ++2++ shortcut). Press ++1++ (or click the
+    four-arrow pan/zoom icon at the top of the layer controls) to return to pan/zoom, then
+    close and re-open the preview so no layer is left shifted.
 
 ## FAQ
 
