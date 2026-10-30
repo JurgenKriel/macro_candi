@@ -102,7 +102,7 @@ Pass partition, GPU and environment on the `sbatch` line, e.g.
 
 | Script | Writes? | Display? | Purpose |
 |---|---|---|---|
-| `scripts/cropping/11_preview_crop.py T` | never | yes (or `--check`) | Look at a box in napari; press ++1++ / ++2++ on opposite corners to print crop flags |
+| `scripts/cropping/11_preview_crop.py T` | never | yes (or `--check`) | Look at a box in napari; press ++j++ / ++k++ on opposite corners to draw the box and print crop flags |
 | `scripts/cropping/12_crop_roi.py --out PATH` | `--out` | no | Copy the box (and `--t0`..`--t1`) to a Blender-ready OME-Zarr |
 
 Both take `--x0/--x1/--y0/--y1/--z0/--z1` in **level-0 voxels** (stop excluded), plus

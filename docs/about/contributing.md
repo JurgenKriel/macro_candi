@@ -83,3 +83,18 @@ mkdocs build --strict # what CI runs; fails on broken links
 
 Every page has an :material-file-edit-outline: edit button that opens the file on GitHub.
 Pushes to `main` that touch `docs/` or `mkdocs.yml` redeploy the site automatically.
+
+### Screenshots
+
+The napari screenshots in `docs/assets/cropping/` are generated from the synthetic demo by
+driving the real preview viewer, so regenerate them whenever `11_preview_crop.py` changes
+how the viewer looks:
+
+```bash
+python -m canmac.demo generate                         # once, if data/demo/ is missing
+pixi run python scripts/docs/cropping_screenshots.py   # needs a display
+```
+
+On a headless node, start a virtual display first with software OpenGL:
+`module load Xvfb; Xvfb :99 -screen 0 1920x1200x24 &`, then prefix the command with
+`DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1`.
