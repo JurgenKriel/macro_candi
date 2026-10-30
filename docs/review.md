@@ -18,6 +18,7 @@ window. Use it on headless nodes or in scripts.
 | `viewers/view_labels.py` | Overlay 3D labels on raw data; tune Cellpose live | `pixi run python viewers/view_labels.py ROI2 macrophage 100` |
 | `viewers/view_engulfment.py` | See *Candida* objects coloured by engulfment class | `pixi run python viewers/view_engulfment.py --t 41` |
 | `viewers/view_candida_split.py` | Inspect yeast-vs-hyphae separation after halo suppression | `pixi run python viewers/view_candida_split.py 90 --preprocess dog` |
+| `scripts/cropping/11_preview_crop.py` | Pick a crop box for 3D rendering ([guide](pipeline/04-cropping.md)) | `pixi run python scripts/cropping/11_preview_crop.py 0` |
 
 ### Common recipes
 

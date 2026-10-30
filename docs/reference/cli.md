@@ -100,11 +100,17 @@ Pass partition, GPU and environment on the `sbatch` line, e.g.
 
 ## Cropping scripts
 
-`scripts/cropping/11_preview_crop.py T` and `scripts/cropping/12_crop_roi.py --out PATH`
-accept `--x0/--x1/--y0/--y1/--z0/--z1` (level-0 voxels), `--channels`, `--include-lysed`,
-`--level` and `--store` (default `$CANMAC_FULLSTACK_ZARR`). The cropper also takes
-`--t0/--t1`, `--extra-levels`, `--chunk-xy`, `--chunk-z`, `--dry-run` and `--overwrite`. See
-[Stage 4](../pipeline/04-cropping.md).
+| Script | Writes? | Display? | Purpose |
+|---|---|---|---|
+| `scripts/cropping/11_preview_crop.py T` | never | yes (or `--check`) | Look at a box in napari; press ++1++ / ++2++ on opposite corners to print crop flags |
+| `scripts/cropping/12_crop_roi.py --out PATH` | `--out` | no | Copy the box (and `--t0`..`--t1`) to a Blender-ready OME-Zarr |
+
+Both take `--x0/--x1/--y0/--y1/--z0/--z1` in **level-0 voxels** (stop excluded), plus
+`--channels`, `--include-lysed`, `--level` and `--store` (default `$CANMAC_FULLSTACK_ZARR`, else
+`full_stack/raw.zarr`; relative paths resolve against your current directory). The cropper also
+takes `--t0/--t1`, `--extra-levels`, `--chunk-xy`, `--chunk-z`, `--dry-run` and `--overwrite`.
+Full option tables, a walkthrough and troubleshooting:
+[Stage 4 · Cropping & 3D rendering](../pipeline/04-cropping.md#option-reference).
 
 ## Viewers
 

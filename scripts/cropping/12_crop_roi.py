@@ -7,21 +7,20 @@ directly. Native resolution is preserved — the point of cropping instead of
 downsampling is to stay under Blender's ~4 GiB per-volume-grid ceiling without
 losing detail.
 
-Usage (VNC GPU desktop terminal, or a compute node):
-    export PATH="$HOME/.pixi/bin:$PATH"
-    cd /vast/scratch/users/kriel.j/monash_lsm
+Usage (any node — no display needed):
+    C=scripts/cropping/12_crop_roi.py
 
     # dry run first — reports size and writes nothing
-    pixi run python 12_crop_roi.py --x0 1200 --x1 2700 --y0 300 --y1 1800 \
-        --out full_stack/roi_a.zarr --dry-run
+    pixi run python $C --x0 1200 --x1 2700 --y0 300 --y1 1800 --out data/roi_a.zarr --dry-run
 
     # single timepoint
-    pixi run python 12_crop_roi.py --x0 1200 --x1 2700 --y0 300 --y1 1800 \
-        --out full_stack/roi_a.zarr
+    pixi run python $C --x0 1200 --x1 2700 --y0 300 --y1 1800 --out data/roi_a.zarr
 
     # a stretch of timelapse (Microscopy Nodes loads this as a VDB sequence)
-    pixi run python 12_crop_roi.py --x0 1200 --x1 2700 --y0 300 --y1 1800 \
-        --t0 0 --t1 40 --out full_stack/roi_a.zarr
+    pixi run python $C --x0 1200 --x1 2700 --y0 300 --y1 1800 --t0 0 --t1 40 --out data/roi_a.zarr
+
+Relative --store / --out paths are resolved against the directory you run the command from.
+Guide: https://jurgenkriel.github.io/macro_candi/pipeline/04-cropping/
 
 The written store is a proper OME-Zarr 0.4 multiscale group nested under /0, the
 same layout bioformats2raw produces, so it opens in napari-ome-zarr and in
@@ -43,6 +42,7 @@ import sys
 import time
 
 REPO = pathlib.Path(__file__).resolve().parents[2]  # repo root (script lives in scripts/cropping/)
+CALLER_CWD = pathlib.Path.cwd()  # captured BEFORE chdir so user-given relative paths mean what they say
 os.chdir(REPO)
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
@@ -57,7 +57,7 @@ VDB_BYTES_PER_VOXEL = 4
 def _import_preview():
     """Reuse the preview script's metadata/box helpers so both agree exactly."""
     import importlib.util
-    path = REPO / "11_preview_crop.py"
+    path = pathlib.Path(__file__).resolve().with_name("11_preview_crop.py")
     if not path.exists():
         sys.exit(f"ERROR: {path} not found (needed for coordinate handling)")
     spec = importlib.util.spec_from_file_location("_preview", path)
@@ -69,7 +69,8 @@ def _import_preview():
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="Crop an ROI from full_stack/raw.zarr into a Blender-ready OME-Zarr.")
-    ap.add_argument("--store", default=DEFAULT_STORE, help="source raw.zarr root")
+    ap.add_argument("--store", default=None,
+                    help="source raw.zarr root (default: $CANMAC_FULLSTACK_ZARR, else full_stack/raw.zarr)")
     ap.add_argument("--out", required=True, help="output .zarr path")
     for ax in "xyz":
         ap.add_argument(f"--{ax}0", type=int, default=None,
@@ -94,6 +95,9 @@ def main() -> None:
     args = ap.parse_args()
 
     pc = _import_preview()
+    args.store = pc.user_path(args.store, DEFAULT_STORE) if args.store is None else \
+        str((CALLER_CWD / os.path.expanduser(args.store)).resolve())
+    args.out = str((CALLER_CWD / os.path.expanduser(args.out)).resolve())
 
     if not os.path.isdir(args.store):
         sys.exit(f"ERROR: no such store: {args.store}")
@@ -219,8 +223,8 @@ def main() -> None:
     print(f"\ndone in {time.time() - t0w:.1f}s -> {args.out}")
     print("\nOpen in Blender: Microscopy Nodes -> file path")
     print(f"  {os.path.abspath(args.out)}/0")
-    print("Check in napari first if you like:")
-    print(f"  pixi run napari --plugin napari-ome-zarr {os.path.abspath(args.out)}/0")
+    print("Check it in napari first (same viewer, pointed at the crop; coordinates restart at 0):")
+    print(f"  pixi run python scripts/cropping/11_preview_crop.py 0 --store {os.path.abspath(args.out)} --level 0")
 
 
 if __name__ == "__main__":

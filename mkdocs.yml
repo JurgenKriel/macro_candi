@@ -74,7 +74,7 @@ nav:
       - 1 · Conversion: pipeline/01-conversion.md
       - 2 · Dataset manifest: pipeline/02-manifest.md
       - 3 · Calibration & bleaching: pipeline/03-calibration.md
-      - 4 · Cropping: pipeline/04-cropping.md
+      - 4 · Cropping & 3D rendering: pipeline/04-cropping.md
       - 5 · 3D segmentation: pipeline/05-segmentation.md
       - 6 · Engulfment: pipeline/06-engulfment.md
       - 7 · Hyphal growth: pipeline/07-hyphae.md
