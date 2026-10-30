@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 PathLike = Union[str, Path]
 
@@ -50,7 +50,7 @@ def spatial_um(zattrs_path: PathLike) -> dict[str, Any]:
     return {"voxel_um": x, "voxel_um3": x * y * z, "isotropic": True}
 
 
-def timestamps_s(ome_xml_path: PathLike) -> dict[str, Any]:
+def timestamps_s(ome_xml_path: PathLike, expected_n: Optional[int] = None) -> dict[str, Any]:
     """Read per-timepoint frame timestamps (s) from OME ``Plane/@DeltaT`` (D-06).
 
     Streams the OME XML with ``ET.iterparse`` + ``el.clear()`` (the file is ~46 MB
@@ -61,7 +61,8 @@ def timestamps_s(ome_xml_path: PathLike) -> dict[str, Any]:
     ``DimensionOrder`` (XYZCT) and Plane list order differ from the Zarr axis
     order (RESEARCH Pitfall 4).
 
-    Asserts exactly 120 timestamps and strict monotonicity (fail loud, V5).
+    Asserts strict monotonicity and, when ``expected_n`` is given (the manifest's
+    ``dims.T``), exactly that many timestamps (fail loud, V5).
 
     Returns ``{"timestamps_s", "n", "interval_min", "interval_min_mean"}`` with
     intervals expressed in minutes (rate units are um/min downstream).
@@ -76,11 +77,13 @@ def timestamps_s(ome_xml_path: PathLike) -> dict[str, Any]:
 
     ts = [first[t] for t in sorted(first)]
     n = len(ts)
-    assert n == 120, f"expected 120 timestamps, got {n}"
+    assert n >= 1, f"no Plane/@DeltaT timestamps in {ome_xml_path}"
+    if expected_n is not None:
+        assert n == expected_n, f"expected {expected_n} timestamps, got {n}"
     assert all(ts[i + 1] > ts[i] for i in range(n - 1)), "timestamps not monotonic increasing"
 
     interval_min = [(ts[i + 1] - ts[i]) / 60.0 for i in range(n - 1)]
-    interval_min_mean = sum(interval_min) / len(interval_min)
+    interval_min_mean = sum(interval_min) / len(interval_min) if interval_min else 0.0
     return {
         "timestamps_s": ts,
         "n": n,

@@ -15,6 +15,7 @@ source config.sh        # do this in every new shell before running sbatch
 | Variable | Default | What to set it to |
 |---|---|---|
 | `CANMAC_REPO` | auto-detected | Absolute path to this repository. Leave it unset. |
+| `CANMAC_MANIFEST` | repo-root `manifest.yaml` | Manifest every stage and viewer reads. `--manifest` on a command sets it for that run. |
 | `CANMAC_RESULTS` | `$CANMAC_REPO/results` | Where outputs go. Needs lots of space. |
 | `PIXI_CACHE_DIR` | `$HOME/.cache/pixi` | pixi package cache. Use fast storage with a large quota. |
 | `CELLPOSE_LOCAL_MODELS_PATH` | `$CANMAC_REPO/models/cellpose` | **Directory containing** the `cpsam` weight file. |

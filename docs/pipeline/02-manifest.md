@@ -23,27 +23,22 @@ cp manifest.example.yaml manifest.yaml
 
 ```yaml title="manifest.yaml"
 datasets:
-  - id: ROI2
+  - id: ROI2                          # becomes results/ROI2/ and the --dataset value
     zarr_path: data/ROI2/raw.zarr     # relative to this file
     component: "0/0"                  # full-resolution array inside the store
     dims: {T: 120, C: 3, Z: 301, Y: 401, X: 369}
-    voxel_um: 0.14499219272808386
+    voxel_um: 0.14499219272808386     # optional; checked against the store
     channels:
       candida: "FF0000"               # omero colour → channel role
       macrophage: "00FF00"
       discard: ["FF00FF"]             # never read
-    parallel_unit: timepoint
-  - id: ROI7
-    zarr_path: data/ROI7/raw.zarr
-    component: "0/0"
-    dims: {T: 120, C: 3, Z: 301, Y: 291, X: 475}
-    voxel_um: 0.14499219272808386
-    channels:
-      candida: "FF0000"
-      macrophage: "00FF00"
-      discard: ["FF00FF"]
-    parallel_unit: timepoint
+    bleach_correct:                   # optional; see Stage 3
+      macrophage: true
+      candida: false
 ```
+
+List as many datasets as you like, one entry each. With a single dataset, `--dataset`
+can be left off every command.
 
 `manifest.yaml` is in `.gitignore` because it holds paths specific to your site.
 
@@ -80,29 +75,34 @@ pixi run python -c "from canmac.io.manifest import load_manifest; import pprint;
 A valid manifest prints back with an extra `_store` field (the resolved absolute path) for
 each dataset.
 
-## Adapting to your own data
+## Field reference
 
-!!! warning "Current hard-coded assumptions"
-    The code was written for the two reference timelapses, and some of their properties are
-    **fixed in the code**, not read from the manifest:
+| Field | Required | Rule |
+|---|---|---|
+| `id` | yes | Letters, digits, `.`, `_`, `-`; unique. Used as a directory name. |
+| `zarr_path` | yes | Store path, relative to the manifest file (or absolute). Must exist. |
+| `dims` | yes | Positive integers `T, C, Z, Y, X`; must equal the on-disk array shape. |
+| `channels.candida`, `channels.macrophage` | yes | Distinct 6-digit hex colours present in the store's `omero` metadata. |
+| `channels.discard` | no | Colours that are never read. |
+| `component` | no | Default `"0/0"`. |
+| `voxel_um` | no | If given, must match the store's NGFF scale (checked by ingest). |
+| `bleach_correct` | no | `{macrophage: bool, candida: bool}`; overrides the default policy. |
+| `parallel_unit` | no | Default and only value: `timepoint`. |
 
-    | Where | What is fixed |
-    |---|---|
-    | `canmac/io/manifest.py` | Exactly 2 datasets, with ids `ROI2` and `ROI7`; `T == 120`; colours `FF0000` / `00FF00` / `FF00FF` |
-    | Every stage and viewer CLI | `--dataset` only accepts `ROI2` or `ROI7` |
-    | `canmac/io/channels.py` | `COLORS` and `DISCARD` constants |
-    | `canmac/io/bleach.py` | `APPLY_POLICY` per channel |
-    | `hyphae2d`, `hyphae_track` | `--t-stop` defaults to `120` |
+Everything else (number of timepoints, voxel size, frame times) is read from the data.
 
-**Workarounds today:**
+## Using more than one manifest
 
-- **Same design, different movie:** give your datasets the ids `ROI2` and `ROI7` (two
-  entries are required), with T=120 and the standard colours.
-- **Different channel colours:** edit `COLORS` / `DISCARD` in `canmac/io/channels.py` and
-  the `_EXPECTED_*` constants in `canmac/io/manifest.py` together.
-- **Different number of timepoints or datasets:** edit `_EXPECTED_IDS` and `_EXPECTED_T` in
-  `canmac/io/manifest.py`, the `choices=[...]` lists in the stage CLIs, and the SLURM
-  `--array` range.
+Every stage and viewer reads, in order: `--manifest PATH` if given, else the
+`CANMAC_MANIFEST` environment variable, else `manifest.yaml` at the repo root. Keeping one
+manifest per experiment and switching with the variable is the tidy pattern:
 
-Making these read from the manifest is the top item on the
-[roadmap](../help/limitations.md#roadmap).
+```bash
+export CANMAC_MANIFEST=/projects/exp-2027-01/manifest.yaml
+python -m canmac.stages.ingest
+python -m canmac.stages.engulfment --dataset well-B3 --all-t
+```
+
+!!! tip "Want to see a complete working manifest?"
+    `python -m canmac.demo generate` writes one to `data/demo/manifest.yaml`. See
+    [Try the demo](../getting-started/demo.md).

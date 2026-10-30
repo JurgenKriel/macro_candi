@@ -33,6 +33,7 @@ from typing import Any, Optional
 import numpy as np
 
 from canmac.io.atomic import atomic_write_json, atomic_write_text, write_done
+from canmac.io.manifest import add_cli_args, resolve_cli
 
 _LOG = logging.getLogger(__name__)
 
@@ -172,7 +173,6 @@ def finalize(dataset: str, out_dir: str = "results/{roi}") -> str:
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="Phase-5 prototype: 3D containment of candida in macrophages (PROPOSED).")
-    ap.add_argument("--dataset", default="ROI2", choices=["ROI2", "ROI7"])
     ap.add_argument("--t", type=int, help="Single timepoint; omit with --all-t to sweep.")
     ap.add_argument("--all-t", action="store_true", dest="all_t",
                     help="Process every timepoint that has BOTH channels segmented.")
@@ -184,14 +184,16 @@ def main() -> None:
                     help="Grow macrophages N voxels before testing (adhesion vs internalization).")
     ap.add_argument("--out-dir", default="results/{roi}", dest="out_dir")
     ap.add_argument("--finalize", action="store_true", help="Concat shards into engulfment.csv.")
+    add_cli_args(ap)
     args = ap.parse_args()
+    record = resolve_cli(ap, args)
 
     if args.finalize:
         print("wrote", finalize(args.dataset, args.out_dir))
         return
 
     kw = dict(engulf_frac=args.engulf_frac, touch_frac=args.touch_frac, dilate=args.dilate)
-    ts = range(120) if args.all_t else ([args.t] if args.t is not None else [])
+    ts = range(record["dims"]["T"]) if args.all_t else ([args.t] if args.t is not None else [])
     if not ts:
         ap.error("give --t N, or --all-t, or --finalize")
     done = 0

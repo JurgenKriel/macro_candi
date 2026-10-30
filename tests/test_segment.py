@@ -52,7 +52,7 @@ def _fake_get_view_factory(vol):
 
 def test_requires_gpu(monkeypatch):
     """The model loader fails loud when no CUDA device is present (D-03)."""
-    import torch
+    torch = pytest.importorskip("torch")
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     with pytest.raises((AssertionError, RuntimeError)):
@@ -66,7 +66,7 @@ def test_eval_config(monkeypatch):
     monkeypatch.setattr(seg, "get_view", _fake_get_view_factory(vol))
 
     params = {"cellprob_threshold": 0.0}
-    seg.segment_timepoint("ROI2", "macrophage", 0, params, model=fake)
+    seg.segment_timepoint("ROI2", "macrophage", 0, params, model=fake, correct=True)
 
     kw = fake.eval_kwargs
     # The stage must call model.eval(vol, do_3D=True, z_axis=0, anisotropy=1.0, ...).
@@ -85,7 +85,8 @@ def test_input_cast_bigendian(monkeypatch):
     vol[:2, :2, :2] = 1000
     monkeypatch.setattr(seg, "get_view", _fake_get_view_factory(vol))
 
-    seg.segment_timepoint("ROI2", "macrophage", 0, {"cellprob_threshold": 0.0}, model=fake)
+    seg.segment_timepoint("ROI2", "macrophage", 0, {"cellprob_threshold": 0.0}, model=fake,
+                          correct=True)
 
     arr = fake.eval_vol
     assert arr.dtype == np.float32

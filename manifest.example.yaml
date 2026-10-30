@@ -1,13 +1,18 @@
-# Copy to manifest.yaml and edit for your data. Dims are cross-checked against the
-# on-disk array and will fail loudly if they disagree.
+# Copy to manifest.yaml (or point $CANMAC_MANIFEST at your copy) and edit for your data.
+# List as many datasets as you like; ids become results/{id}/ and the --dataset value.
+# Dims are cross-checked against the on-disk array and will fail loudly if they disagree.
+# Try the pipeline without real data first: `pixi run demo` (see the docs, "Try the demo").
 datasets:
-  - id: ROI2
-    zarr_path: data/ROI2/raw.zarr
-    component: "0/0"
+  - id: ROI2                        # letters, digits, . _ - (used as a directory name)
+    zarr_path: data/ROI2/raw.zarr    # relative to this file
+    component: "0/0"                 # level-0 array inside the store (default "0/0")
     dims: {T: 120, C: 3, Z: 301, Y: 401, X: 369}
-    voxel_um: 0.14499219272808386
-    channels:
+    voxel_um: 0.14499219272808386    # optional; checked against the store's NGFF scale
+    channels:                        # omero hex colours, read from raw.zarr/0/.zattrs
       candida: "FF0000"
       macrophage: "00FF00"
-      discard: ["FF00FF"]
-    parallel_unit: timepoint
+      discard: ["FF00FF"]            # optional; never read
+    bleach_correct:                  # optional; default macrophage: true, candida: false
+      macrophage: true
+      candida: false
+    parallel_unit: timepoint         # optional; the only supported value

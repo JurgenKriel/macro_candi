@@ -17,22 +17,25 @@ These affect how far the numbers can be trusted.
 
 | Area | Status |
 |---|---|
-| Dataset identity | The manifest validator and every CLI accept only `ROI2` / `ROI7`, with T=120 and fixed channel colours. |
-| Site paths in `pixi.toml` | `[activation.env]` holds absolute paths from the original cluster and overrides `config.sh`. |
-| Scripts with original paths | `microsam_env/` scripts and some docstrings refer to `/vast/scratch/users/kriel.j/...`. |
-| Packaging | `canmac` is not pip-installable. Stages must run from the repo root. |
+| Dataset identity | :material-check-circle:{ style="color: #2e7d32" } Any number of datasets, any ids, T, voxel size and channel colours, all read from the [manifest](../pipeline/02-manifest.md) and the data. |
+| Testing without data | :material-check-circle:{ style="color: #2e7d32" } A [synthetic demo](../getting-started/demo.md) with known answers runs the whole pipeline in CI on every push. |
+| Site paths in `pixi.toml` | :material-alert:{ style="color: #ef6c00" } `[activation.env]` holds absolute paths from the original cluster and overrides `config.sh`. |
+| Scripts with original paths | :material-alert:{ style="color: #ef6c00" } `microsam_env/` scripts and some docstrings refer to `/vast/scratch/users/kriel.j/...`. |
+| Reference-data tests | :material-information:{ style="color: #1565c0" } Tests tied to the original ROI2/ROI7 stores skip when that data is absent. |
+| Packaging | :material-information:{ style="color: #1565c0" } `canmac` is not pip-installable. Stages must run from the repo root. |
 | Platform | `linux-64` only; needs SLURM for the batch scripts. |
 
 ## Roadmap
 
 In rough priority order:
 
-1. **Data-driven configuration:** read dataset ids, T, channel colours and bleach policy from
-   the manifest, not code constants; remove the CLI `choices` restriction.
+1. ~~**Data-driven configuration**~~ :material-check: done: dataset ids, T, channel colours
+   and bleach policy come from the manifest.
 2. **Portable `pixi.toml`:** move site paths out of `[activation.env]`.
 3. **Engulfment persistence:** require containment for ≥ N consecutive frames; classify fate.
 4. **Better *Candida* masks:** filament-aware segmentation (e.g. micro-sam, ridge filters).
-5. **Ground-truth set:** annotate a subset of frames and fit thresholds against it.
-6. **Drift correction** before cross-time analysis.
-7. **Packaging:** `pip install -e .` with console entry points (`canmac ingest`, `canmac segment`, …).
-8. **CI:** run the CPU test suite and build the docs on every push.
+5. **Ground-truth set:** annotate a subset of real frames and fit thresholds against it.
+6. **A small real example dataset** (e.g. a cropped ROI on Zenodo) alongside the synthetic demo.
+7. **Drift correction** before cross-time analysis.
+8. **Packaging:** `pip install -e .` with console entry points (`canmac ingest`, `canmac segment`, …).
+9. ~~**CI**~~ :material-check: done: CPU tests, the demo and the docs build run on every push.

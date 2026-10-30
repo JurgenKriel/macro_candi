@@ -1,7 +1,8 @@
 # Your first run
 
 This page takes one dataset (`ROI2` in the examples) from a raw CZI file to an engulfment
-table and a hyphal growth table. Tick the boxes as you go. Each step says **what to check**
+table and a hyphal growth table. If you haven't yet, run [the demo](demo.md) first: it
+uses the same commands on synthetic data in two minutes. Tick the boxes as you go. Each step says **what to check**
 before moving on, because a mistake caught early costs minutes and one caught late costs a
 day of GPU time.
 
@@ -39,12 +40,6 @@ SB="--partition=$CANMAC_PARTITION_GPU --gres=$CANMAC_GRES --cpus-per-task=$CANMA
     ```bash
     pixi run python -c "from canmac.io.manifest import load_manifest; print(load_manifest())"
     ```
-
-!!! warning "The manifest currently expects both reference datasets"
-    The validator requires **exactly two** entries with ids `ROI2` and `ROI7`, T=120, and
-    the default channel colours. A manifest listing only `ROI2` (as in the example file) is
-    rejected with `expected exactly 2 datasets`. Add an `ROI7` entry, or read
-    [Adapting to your own data](../pipeline/02-manifest.md#adapting-to-your-own-data).
 
 [Details →](../pipeline/02-manifest.md)
 

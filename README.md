@@ -1,6 +1,7 @@
 # macro_candi
 
 [![Docs](https://github.com/JurgenKriel/macro_candi/actions/workflows/docs.yml/badge.svg)](https://jurgenkriel.github.io/macro_candi/)
+[![Tests](https://github.com/JurgenKriel/macro_candi/actions/workflows/tests.yml/badge.svg)](https://github.com/JurgenKriel/macro_candi/actions/workflows/tests.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![Cite](https://img.shields.io/badge/cite-CITATION.cff-green.svg)](CITATION.cff)
 
@@ -27,14 +28,22 @@ CZI ──▶ OME-Zarr ──▶ calibrate ──▶ 3D segmentation ──┬�
 > be confirmed by eye (napari viewers and review notebooks are included for this) before it
 > is treated as a result. See [Known limitations](https://jurgenkriel.github.io/macro_candi/help/limitations/).
 
-## Quick start
-
-Requires Linux + SLURM, [pixi](https://pixi.sh), and an NVIDIA GPU with **≥ 16 GB** VRAM.
+## Try it in two minutes (no data, no GPU)
 
 ```bash
 git clone https://github.com/JurgenKriel/macro_candi.git && cd macro_candi
 pixi install
-pixi run pytest tests/ -q -m "not gpu"
+pixi run demo        # synthetic timelapse → every stage → scored against the known answer
+```
+
+[What the demo does →](https://jurgenkriel.github.io/macro_candi/getting-started/demo/)
+
+## Quick start on a cluster
+
+Requires Linux + SLURM, [pixi](https://pixi.sh), and an NVIDIA GPU with **≥ 16 GB** VRAM.
+
+```bash
+pixi run test
 
 source config.sh
 sbatch --partition=$CANMAC_PARTITION_GPU --gres=$CANMAC_GRES scripts/slurm/00_env_smoke.sh
@@ -71,6 +80,7 @@ The docs are Markdown files in [`docs/`](docs/). Preview them locally with
 | `params/` | Cellpose-SAM parameter sidecars |
 | `microsam_env/` | Isolated, experimental micro-sam environment |
 | `tests/` | pytest suite (CPU + GPU-marked) |
+| `canmac/demo.py` · `scripts/demo/` | Synthetic demo dataset, end-to-end run, ground-truth check |
 | `docs/` · `mkdocs.yml` | Documentation website |
 
 ## License & citation

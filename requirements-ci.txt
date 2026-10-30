@@ -1,0 +1,14 @@
+# Lightweight CPU environment for CI and the synthetic demo — NOT the analysis environment.
+# The real pipeline uses pixi (pixi.toml / pixi.lock), which adds torch + Cellpose-SAM + napari.
+# Tests that need those skip cleanly here.
+zarr>=3.2
+dask
+ome-zarr>=0.18
+scikit-image>=0.26
+skan>=0.13
+networkx>=3.6
+scipy
+matplotlib
+pandas
+pyyaml
+pytest>=8

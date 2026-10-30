@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 from canmac.io.atomic import atomic_write_json, write_done
 from canmac.io.metadata import spatial_um, timestamps_s
@@ -28,6 +28,7 @@ def emit_calibration(
     zattrs_path: PathLike,
     ome_xml_path: PathLike,
     out_dir: str = "results/{roi}",
+    expected_n: Optional[int] = None,
 ) -> str:
     """Assemble and atomically write ``{out_dir}/calibration.json`` for one dataset.
 
@@ -36,7 +37,7 @@ def emit_calibration(
     ``calibration.json``. The ``.done`` sentinel is written last (atomicity).
     """
     spatial = spatial_um(zattrs_path)
-    time = timestamps_s(ome_xml_path)
+    time = timestamps_s(ome_xml_path, expected_n=expected_n)
 
     record: dict[str, Any] = {
         "dataset": dataset_id,
@@ -65,7 +66,7 @@ def _paths_for(record: dict) -> tuple[str, str]:
 
 def main() -> None:
     """Emit a calibration.json for each dataset enumerated in the manifest."""
-    from canmac.io.manifest import datasets
+    from canmac.io.manifest import datasets, use_manifest
 
     parser = argparse.ArgumentParser(description="Emit per-dataset calibration.json sidecars.")
     parser.add_argument(
@@ -79,10 +80,12 @@ def main() -> None:
         help="Output dir template (default: results/{roi}).",
     )
     args = parser.parse_args()
+    use_manifest(args.manifest)
 
     for d in datasets(args.manifest):
         zattrs_path, ome_xml_path = _paths_for(d)
-        out_path = emit_calibration(d["id"], zattrs_path, ome_xml_path, out_dir=args.out_dir)
+        out_path = emit_calibration(d["id"], zattrs_path, ome_xml_path, out_dir=args.out_dir,
+                                    expected_n=d["dims"]["T"])
         rec_voxel = spatial_um(zattrs_path)["voxel_um"]
         ts = timestamps_s(ome_xml_path)
         print(

@@ -47,7 +47,9 @@ def ready_timepoints(dataset: str, candida_store: str | None = None) -> list[int
     mac_store = f"results/{dataset}/macrophage_labels.zarr"
     cand_store = f"results/{dataset}/{candida_store or 'candida_labels'}.zarr"
     out = []
-    for t in range(120):
+    from canmac.io.manifest import n_timepoints
+
+    for t in range(n_timepoints(dataset)):
         m = f"{mac_store}/t{t:03d}"
         c = f"{cand_store}/t{t:03d}"
         if is_done(m) and is_done(c):
@@ -57,7 +59,6 @@ def ready_timepoints(dataset: str, candida_store: str | None = None) -> list[int
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="View PROPOSED engulfment/containment in napari.")
-    ap.add_argument("--dataset", default="ROI2", choices=["ROI2", "ROI7"])
     ap.add_argument("--t", type=int, default=None,
                     help="Timepoint (default: the latest one with both channels segmented).")
     ap.add_argument("--candida", type=int, default=None,
@@ -71,7 +72,11 @@ def main() -> None:
     ap.add_argument("--margin", type=int, default=20, help="Crop margin in voxels for --candida.")
     ap.add_argument("--list", action="store_true", help="List ready timepoints and exit.")
     ap.add_argument("--check", action="store_true", help="Print the table; do not open napari.")
+    from canmac.io.manifest import add_cli_args, resolve_cli
+
+    add_cli_args(ap)
     args = ap.parse_args()
+    resolve_cli(ap, args)
 
     from canmac.io.reader import get_view
     from canmac.stages.engulfment import containment, load_labels
@@ -131,12 +136,9 @@ def main() -> None:
 
     import napari
 
-    from canmac.io.manifest import get
+    from canmac.io.reader import voxel_um
 
-    try:
-        vox = float(get(args.dataset)["voxel_um"])
-    except Exception:
-        vox = 0.14499219272808386
+    vox = voxel_um(args.dataset)  # from the store's NGFF scale
     scale = (vox, vox, vox)
     v = napari.Viewer(ndisplay=3)
     v.add_image(mac_raw[sl], name="macrophage raw", scale=scale, colormap="green",

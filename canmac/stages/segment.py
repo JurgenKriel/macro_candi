@@ -193,12 +193,51 @@ def normalize_volume(
     raise ValueError(f"unknown normalize method {method!r} (none|localstd|clahe)")
 
 
+def classical_segment(vol: np.ndarray, params: dict) -> np.ndarray:
+    """CPU fallback: smooth -> Otsu -> fill holes -> (optional watershed split) -> labels.
+
+    **For the synthetic demo and CI only** (``params["method"] == "classical"``). On real
+    lattice light-sheet data it merges touching cells, which is exactly why production
+    uses Cellpose-SAM (D-01). Keys: ``smooth_sigma`` (voxels, default 1.0),
+    ``threshold_scale`` (x Otsu, default 1.0), ``min_size`` (voxels, default 15),
+    ``split_touching`` (distance-transform watershed, default false) and
+    ``min_distance`` (watershed seed spacing in voxels, default 5).
+    """
+    from scipy import ndimage as ndi
+    from skimage.filters import threshold_otsu
+    from skimage.measure import label
+
+    v = ndi.gaussian_filter(vol, float(params.get("smooth_sigma", 1.0)))
+    if float(v.max()) <= float(v.min()):
+        return np.zeros(vol.shape, dtype=np.uint16)  # blank frame
+    mask = v > threshold_otsu(v) * float(params.get("threshold_scale", 1.0))
+    mask = ndi.binary_fill_holes(mask)
+    cc = label(mask)
+    sizes = np.bincount(cc.ravel())
+    sizes[0] = 0
+    mask = (sizes >= int(params.get("min_size", 15)))[cc]  # drop specks (version-stable)
+    if params.get("split_touching", False):
+        from skimage.feature import peak_local_max
+        from skimage.segmentation import watershed
+
+        dist = ndi.distance_transform_edt(mask)
+        peaks = peak_local_max(dist, min_distance=int(params.get("min_distance", 5)),
+                               labels=label(mask), exclude_border=False)
+        markers = np.zeros(mask.shape, dtype=np.int32)
+        markers[tuple(peaks.T)] = np.arange(1, len(peaks) + 1)
+        labels = watershed(-dist, markers, mask=mask)
+    else:
+        labels = label(mask)
+    return labels.astype(np.uint16)
+
+
 def segment_timepoint(
     dataset: str,
     channel: str,
     t: int,
     params: dict,
     model: Optional[Any] = None,
+    correct: Optional[bool] = None,
 ) -> np.ndarray:
     """Segment ONE timepoint volume into a uint16 3D instance-label array.
 
@@ -210,12 +249,24 @@ def segment_timepoint(
 
     ``model`` may be injected (tests / a pre-loaded batch driver) to bypass the GPU
     guard + weight load; otherwise :func:`_load_model` supplies the cached model.
+    ``params["method"] == "classical"`` skips Cellpose entirely and runs
+    :func:`classical_segment` on the CPU (synthetic demo / CI only).
+
+    ``correct`` defaults to the dataset's bleach policy (manifest ``bleach_correct``,
+    else macrophage corrected / candida raw — D-05), the same policy ingest recorded.
     Returns instance labels as ``uint16`` (per-frame counts are far below 65535).
     """
-    if model is None:
+    method = params.get("method", "cellpose")
+    if method not in ("cellpose", "classical"):
+        raise ValueError(f"unknown segmentation method {method!r} (cellpose|classical)")
+    if method == "cellpose" and model is None:
         model = _load_model()
 
-    correct = channel == "macrophage"  # D-05 bleach policy (candida raw = NO-OP)
+    if correct is None:
+        from canmac.io.bleach import should_apply
+        from canmac.io.manifest import get as get_dataset
+
+        correct = should_apply(channel, get_dataset(dataset))  # D-05 policy
     vol = get_view(dataset, channel, t, correct=correct).compute()  # ONE (Z,Y,X) >u2
     # Big-endian >u2 -> native float32, C-contiguous, BEFORE torch (Pitfall 2).
     vol = np.ascontiguousarray(vol).astype(np.float32)
@@ -227,6 +278,8 @@ def segment_timepoint(
         dog_low=params.get("dog_low", 1.0),
         dog_high=params.get("dog_high", 6.0),
     )
+    if method == "classical":
+        return classical_segment(vol, params)
 
     labels, _flows, _styles = model.eval(
         vol,
@@ -364,12 +417,13 @@ def main() -> None:
     """
     import json
 
-    from canmac.io.manifest import get
+    from canmac.io import manifest as mf
 
     parser = argparse.ArgumentParser(
         description="Phase-3 segmentation: one timepoint -> 3D instance labels + census row."
     )
-    parser.add_argument("--dataset", required=True, choices=["ROI2", "ROI7"])
+    parser.add_argument("--dataset", default=None,
+                        help="Dataset id from the manifest (optional if it lists only one).")
     parser.add_argument("--channel", choices=["macrophage", "candida"])
     parser.add_argument("--t", type=int, help="Timepoint index (e.g. $SLURM_ARRAY_TASK_ID).")
     parser.add_argument(
@@ -381,6 +435,11 @@ def main() -> None:
         "--finalize", action="store_true", help="Concat census shards into census.csv and exit."
     )
     args = parser.parse_args()
+    mf.use_manifest(args.manifest)
+    try:
+        args.dataset = mf.resolve_dataset_id(args.dataset)
+    except ValueError as e:
+        parser.error(str(e))
 
     resolved_out = (
         args.out_dir.format(roi=args.dataset) if "{roi}" in args.out_dir else args.out_dir
@@ -396,7 +455,7 @@ def main() -> None:
         parser.error("--channel and --t are required unless --finalize is given")
 
     # Fail-loud --t bounds check against manifest dims (D-08 / V5 input validation).
-    record = get(args.dataset, args.manifest)
+    record = mf.get(args.dataset)
     n_t = record["dims"]["T"]
     if not (0 <= args.t < n_t):
         parser.error(f"--t {args.t} out of range [0,{n_t}) for {args.dataset}")
@@ -405,7 +464,7 @@ def main() -> None:
     params_path = args.params or f"params/cpsam_{args.channel}.json"
     with open(params_path) as f:
         params = json.load(f)
-    if "cellprob_threshold" not in params:
+    if params.get("method", "cellpose") == "cellpose" and "cellprob_threshold" not in params:
         parser.error(f"params {params_path} missing required key 'cellprob_threshold'")
 
     store_path = f"{resolved_out}/{args.channel}_labels.zarr"

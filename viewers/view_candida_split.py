@@ -76,16 +76,24 @@ def compute_split(dataset, t, preprocess, tophat_radius, dog_low, dog_high, min_
 def main() -> None:
     ap = argparse.ArgumentParser(description="View the PROPOSED candida threshold/skeleton split in napari.")
     ap.add_argument("t", type=int, help="Timepoint index (e.g. 90).")
-    ap.add_argument("--dataset", default="ROI2", choices=["ROI2", "ROI7"])
     ap.add_argument("--preprocess", default="dog", choices=["none", "dog", "tophat"])
     ap.add_argument("--tophat-radius", type=int, default=10, dest="tophat_radius")
     ap.add_argument("--dog-low", type=float, default=1.0, dest="dog_low")
     ap.add_argument("--dog-high", type=float, default=6.0, dest="dog_high")
     ap.add_argument("--min-size", type=int, default=8, dest="min_size")
     ap.add_argument("--len-um-hyphae", type=float, default=3.0, dest="len_um_hyphae")
-    ap.add_argument("--vox", type=float, default=0.14499219272808386)
+    ap.add_argument("--vox", type=float, default=None,
+                    help="Voxel size in um (default: from the store's NGFF scale).")
     ap.add_argument("--check", action="store_true", help="Print the table, do not open napari.")
+    from canmac.io.manifest import add_cli_args, resolve_cli
+
+    add_cli_args(ap)
     args = ap.parse_args()
+    resolve_cli(ap, args)
+    if args.vox is None:
+        from canmac.io.reader import voxel_um
+
+        args.vox = voxel_um(args.dataset)
 
     raw, thr, skel, class_vol, table = compute_split(
         args.dataset, args.t, args.preprocess, args.tophat_radius, args.dog_low,
