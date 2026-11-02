@@ -56,7 +56,8 @@ def build(pc, level: int | None, box: dict | None, title: str):
     um = {d: levels[0]["scale"][axes.index(d)] for d in "xyz"}
     extent = {d: pc.axis_len(axes, shape0, d) for d in "zyx"}
     chans = pc.select_channels(STORE, "all", omero, False)
-    v = pc.open_viewer(sub, chans, scale, trans, um, extent, title=title, show=True)
+    v = pc.open_viewer(sub, chans, scale, trans, um, extent, title=title, show=True,
+                       ndisplay=3)  # as with --3d; shots 2-3 switch to 2D themselves
     v.window._qt_window.resize(*WINDOW)
     import numpy as np
 
