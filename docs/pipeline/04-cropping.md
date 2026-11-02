@@ -97,22 +97,30 @@ choose again. See [troubleshooting](#troubleshooting).
     repository, that opens without `--store` too.
 
 Once it's open, the panel shows the dataset's size, voxel size, number of timepoints and
-channels. It shows timepoint 0 at a coarse pyramid level, which is fast to look around in.
-Only the planes on screen are read, never the whole dataset. You get one layer per channel
-(*Candida* red, macrophages green), an empty **crop box** layer, and the **Crop** panel
-below the Dataset panel. The view is **2D**, one Z slice at a time; move through Z with the
-slider under the image.
+channels. It shows the **whole timelapse** at a coarse pyramid level, which is fast to look
+around in. Only the planes on screen are read, never the whole dataset. You get one layer
+per channel (*Candida* red, macrophages green), an empty **crop box** layer, and the
+**Crop** panel below the Dataset panel. The view is **2D**, one Z slice at a time.
 
-To look at another **timepoint** or **preview level**, change it in the Dataset panel and
-click **Show**. Your box stays where it is. Opening a **different dataset** starts with a
-fresh box, as its coordinates mean something else.
+Under the image are two sliders:
+
+- **z** moves through the slices.
+- **t** moves through time. Its **▶** button plays the movie (right-click it for the
+  frame rate and looping), so you can watch the cells move before choosing a region. The
+  **Timepoint** box in the Dataset panel follows the slider, and typing a number there jumps
+  to it. It opens on timepoint 0, or the one given with `--t0 N`.
+
+To change the **preview level**, set it in the Dataset panel and click **Show**. Your box and
+timepoint stay where they are. Opening a **different dataset** starts with a fresh box, as
+its coordinates mean something else.
 
 <figure markdown="span">
   ![The crop GUI in 2D: the image with a yellow crop rectangle in the middle, the layer list on the left with a "crop box" layer above the channel layers, the Dataset panel at the top right showing data/demo/DEMO/raw.zarr at timepoint 12, and the Crop panel below it with step-by-step instructions, Draw box / Whole slice / Clear buttons, x/y/z start and end boxes, Start here / End here buttons, time range, channel checkboxes, output path, the Blender size check and the Copy command / Crop buttons](../assets/cropping/02-draw-box.png){ loading=lazy }
   <figcaption>The crop GUI with a box drawn. <b>Left:</b> layers; the <code>crop box</code>
   layer holds your rectangle. <b>Middle:</b> the image; the overlay (top-left) shows the cursor
   and the box in full-resolution voxels. <b>Right:</b> the Dataset panel (which dataset,
-  timepoint and preview level) and the Crop panel.</figcaption>
+  timepoint and preview level) and the Crop panel. <b>Bottom:</b> the z and t sliders.
+  </figcaption>
 </figure>
 
 To look at the whole volume in 3D first, click the **2D/3D** button (bottom-left) or start
@@ -144,7 +152,7 @@ The rectangle is the same on every Z slice: it marks X and Y only.
 
 ### 3. Set the Z range
 
-Scroll to the first slice you want and click **Start here**. Scroll to the last slice you
+Move the **z** slider to the first slice you want and click **Start here**. Scroll to the last slice you
 want and click **End here**. That slice is included. You can also type into the **z** boxes.
 
 The rectangle is **yellow on slices inside the Z range and grey outside it**. Scrolling
@@ -158,14 +166,24 @@ slice is inside.
 
 ### 4. Choose time and channels
 
-- **Time:** **from** is the first timepoint, and **to (not incl.)** is one past the last.
-  `12` → `18` gives 6 timepoints. **All N** takes the whole movie. Microscopy Nodes loads a
-  multi-timepoint crop as a sequence.
+- **Time:** move the **t** slider to the first timepoint you want and click **From here**,
+  then to the last one and click **To here** (it is included). Or type them: **from** is
+  the first timepoint, and **to (not incl.)** is one past the last, so `12` → `18` gives 6
+  timepoints. **All N** takes the whole movie. Microscopy Nodes loads a multi-timepoint crop
+  as a sequence.
 - **Channels:** untick any you don't need. The lysed-cell channel is never offered unless
   you started the GUI with `--include-lysed`.
 
-Cells move. Check the box still covers what you care about at other timepoints: set
-**Timepoint** in the Dataset panel and click **Show**. The box stays put while you look.
+Cells move. Play the movie, or drag the **t** slider through your time range, and check
+the box still covers what you care about at every timepoint. Like the Z range, the box is
+**grey at timepoints outside the time range** and the overlay says so, so you can also see
+what you'd leave out.
+
+<figure markdown="span">
+  ![Timepoint 21, after a time range of 12 to 17: the box is grey, the overlay says "timepoint 21 is OUTSIDE the crop's time range 12-17", and the hypha has grown past the bottom edge of the box](../assets/cropping/03b-outside-time-range.png){ loading=lazy }
+  <figcaption>Timepoint 21 is after the time range (12–17), so the box is grey. By then the
+  hypha has grown out of the box: extend the box or the time range if you need it.</figcaption>
+</figure>
 
 ### 5. Check the size
 
@@ -231,7 +249,8 @@ In Blender: **Microscopy Nodes** panel → file path → the `.../roi_a.zarr/0` 
 | To… | Do this |
 |---|---|
 | Pan / zoom | Drag / scroll on the image (with an image layer selected, not the crop box) |
-| Move through Z | The slider under the image |
+| Move through Z | The **z** slider under the image |
+| Move through time / play the movie | The **t** slider under the image; its ▶ button plays (right-click it for speed and looping) |
 | 2D ↔ 3D | The **2D/3D** button (bottom-left), or ++ctrl+y++ |
 | See dim structures | Select a channel layer, then lower the **contrast limits** or **gamma** (top-left) |
 | Hide a channel or the box | The eye icon next to the layer |
@@ -327,13 +346,13 @@ crops/roi_a.zarr/
 ### `12_crop_roi.py --gui` / `11_preview_crop.py T`: the crop GUI
 
 `12_crop_roi.py --gui` opens the same window as `11_preview_crop.py`. It passes on
-`--store`, `--t0` (the timepoint shown first), `--level`, `--channels`, `--include-lysed`
+`--store`, `--t0` (the timepoint the t slider starts on), `--level`, `--channels`, `--include-lysed`
 and any box flags, which pre-fill the crop box. Everything is optional: with no options the
 window opens and asks for the dataset.
 
 | Option (`11_preview_crop.py`) | Default | Meaning |
 |---|---|---|
-| `T` | `0` | Timepoint to show first (0-based); the panel's time range starts here. Change it later in the Dataset panel |
+| `T` | `0` | Timepoint to show first (0-based); the panel's time range starts here. Every timepoint is on the **t** slider |
 | `--store PATH` | `$CANMAC_FULLSTACK_ZARR`, else `full_stack/raw.zarr` if it exists, else **ask in the window** | Dataset to open: the `.zarr` folder, a folder inside it, or the folder just above it |
 | `--x0 --x1 --y0 --y1 --z0 --z1` | full extent | Load only this region (level-0 voxels), and pre-fill the crop box with it. Use it with `--level 0` for a sharper look at a small area |
 | `--level N` | 2, or the coarsest level available | Pyramid level to *display*. Crops are always written at full resolution |

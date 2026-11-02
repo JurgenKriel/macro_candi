@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """Preview the full_stack OME-Zarr in napari and crop a box from it (the crop GUI).
 
-Opens ONE timepoint at ONE pyramid level as lazy dask layers (only the planes on screen
-are read), in 2D. Draw the crop box on the "crop box" layer, set its Z range, time
+Opens the whole timelapse at ONE pyramid level as lazy dask layers (only the planes on
+screen are read), in 2D, with a t slider (and play button) and a z slider. Draw the crop box on the "crop box" layer, set its Z range, time
 range, channels and output in the Crop panel on the right, and press Crop: the box is
 written at full resolution by 12_crop_roi.write_crop on a background thread. Nothing is
 written until you press Crop. ``12_crop_roi.py --gui`` launches exactly this.
@@ -212,11 +212,27 @@ class BoxController:
     def __init__(self, viewer, layer, um: dict, extent: dict):
         self.v, self.layer, self.um, self.extent = viewer, layer, um, extent
         self.box = None
+        self.t_range = None  # (t0, t1) the crop will take, t1 excluded; None = not set
         self.listeners = []  # fn(box, source)
+        self.refresh = lambda: None  # redraws the overlay; set by open_viewer
         self._guard = False
 
     def current_z(self) -> int:
-        return int(np.clip(round(self.v.dims.point[0] / self.um["z"]), 0, self.extent["z"] - 1))
+        return int(np.clip(round(self.v.dims.point[-3] / self.um["z"]), 0, self.extent["z"] - 1))
+
+    def current_t(self) -> int:
+        return int(round(self.v.dims.point[0])) if self.v.dims.ndim > 3 else 0
+
+    def set_t_range(self, t0: int, t1: int):
+        self.t_range = (t0, t1)
+        self.recolor()
+        self.refresh()
+
+    def in_range(self) -> tuple:
+        """(this slice inside the box's Z range, this timepoint inside the time range)"""
+        z0, z1 = self.box["z"]
+        t_ok = self.t_range is None or self.t_range[0] <= self.current_t() < self.t_range[1]
+        return z0 <= self.current_z() < z1, t_ok
 
     def set_box(self, box, source: str = "code"):
         if box is not None:
@@ -235,11 +251,11 @@ class BoxController:
             fn(box, source)
 
     def recolor(self, *_):
-        """Yellow on slices inside the box's Z range, grey outside: the 3D extent at a glance."""
+        """Yellow on slices inside the box's Z range (at timepoints inside the time range),
+        grey elsewhere: the box's extent in Z and time at a glance."""
         if self.box is None or not len(self.layer.data):
             return
-        z0, z1 = self.box["z"]
-        inside = z0 <= self.current_z() < z1
+        inside = all(self.in_range())
         self.layer.edge_color = "yellow" if inside else "gray"
         self.layer.opacity = 1.0 if inside else 0.6
 
@@ -359,13 +375,19 @@ def prepare(store: str, t: int = 0, level: int | None = None, channels: str = "a
     lv = levels[level]
     b = scale_box(box0, shape0, lv["shape"], axes)
     arr = da.from_zarr(store, component=f"0/{lv['path']}")  # lazy: nothing read yet
-    idx = tuple(t if d == "t" else slice(None) if d == "c" else slice(*b[d]) for d in axes)
+    # every timepoint, so napari gets a time slider; still lazy: only planes on screen are read
+    idx = tuple(slice(None) if d in "tc" else slice(*b[d]) for d in axes)
+    sub = arr[idx]
+    if "t" not in axes:
+        sub = sub[None]
+    if "c" not in axes:
+        sub = sub[:, None]
     spatial = [d for d in axes if d in "zyx"]
     return {
         "store": store, "levels": levels, "axes": axes, "omero": omero, "chans": chans,
         "shape0": shape0, "level": level, "t": t, "n_t": n_t, "box0": box0,
         "box_given": any(v is not None for v in vars(ns).values()),
-        "sub": arr[idx],  # (C, Z, Y, X), t dropped
+        "sub": sub,  # (T, C, Z, Y, X); ``t`` is the timepoint shown first
         "nap_scale": [lv["scale"][axes.index(d)] for d in spatial],
         # place the box where it sits in the whole volume: napari world coords = absolute um
         "nap_translate": [b[d][0] * lv["scale"][axes.index(d)] for d in spatial],
@@ -430,7 +452,7 @@ def reset_viewer(v) -> None:
 
 def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
                 title: str = "ROI preview", show: bool = True, ndisplay: int = 2,
-                crop_ctx: dict | None = None, viewer=None):
+                crop_ctx: dict | None = None, viewer=None, t: int = 0):
     """Fill a napari viewer: one layer per channel, a live level-0 cursor readout, an
     editable "crop box" shapes layer, J / K corner picking and (with ``crop_ctx``) the Crop
     panel that writes the crop. Draw, J / K and the panel all edit one box.
@@ -438,7 +460,8 @@ def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
     Layers carry ``scale`` (um/voxel at the previewed level) and ``translate`` (the box's
     offset in um), so napari WORLD coordinates are absolute micrometres in the whole
     volume and ``world_um / um[d]`` is the level-0 voxel index whatever box or level is
-    on screen. A new viewer is made unless ``viewer`` is given (it is then emptied and
+    on screen. ``sub`` is (T, C, Z, Y, X): the first slider is time (starting at ``t``),
+    so a timelapse can be played; the second is Z. A new viewer is made unless ``viewer`` is given (it is then emptied and
     refilled: how the Dataset panel switches datasets). Unshown when ``show=False``.
 
     Opens in 2D by default: boxes are drawn in 2D, and 2D needs no 3D textures, so it
@@ -464,11 +487,12 @@ def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
                 kw["colormap"] = Colormap([[0, 0, 0], rgb], name=f"c{i}")
             except (ValueError, IndexError):
                 pass
-        v.add_image(sub[i], name=f"{label}", scale=nap_scale,
-                    translate=nap_translate, blending="additive", rendering="mip",
-                    units=("um",) * len(nap_scale), **kw)
+        v.add_image(sub[:, i], name=f"{label}", scale=[1, *nap_scale],
+                    translate=[0, *nap_translate], blending="additive", rendering="mip",
+                    units=(None, *("um",) * len(nap_scale)), **kw)
     v.scale_bar.visible = True  # reads um from the layers' units (scale_bar.unit is a no-op)
-    v.dims.axis_labels = ("z", "y", "x")
+    v.dims.axis_labels = ("t", "z", "y", "x")
+    v.dims.set_point(0, t)
     v.axes.visible = True
     v.axes.labels = True
 
@@ -495,7 +519,8 @@ def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
     def refresh(*_):
         v.axes.visible = v.dims.ndisplay == 3  # in 2D the axes sit on top of this overlay
         c = cursor_vox0()
-        lines = [f"cursor (level-0 voxels)   x {c['x']}   y {c['y']}   z {c['z']}"]
+        lines = [f"cursor (level-0 voxels)   x {c['x']}   y {c['y']}   z {c['z']}   "
+                 f"t {ctrl.current_t()}"]
         if v.dims.ndisplay == 3:
             lines.append("3D view: positions are approximate - switch to 2D to draw the box")
         for key in ("1", "2"):
@@ -504,8 +529,13 @@ def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
                 lines.append(f"corner {key}:  x {p['x']}  y {p['y']}  z {p['z']}")
         if ctrl.box is not None:
             z0, z1 = ctrl.box["z"]
-            where = "inside" if z0 <= ctrl.current_z() < z1 else "OUTSIDE"
+            z_ok, t_ok = ctrl.in_range()
+            where = "inside" if z_ok else "OUTSIDE"
             lines.append(f"box: {box_flags(ctrl.box)}   (this slice is {where} z {z0}-{z1 - 1})")
+            if ctrl.t_range is not None and not t_ok:
+                a, b = ctrl.t_range
+                lines.append(f"timepoint {ctrl.current_t()} is OUTSIDE the crop's time range "
+                             f"{a}-{b - 1}")
         else:
             lines.append("draw a rectangle on 'crop box', or press J / K on opposite corners")
         v.text_overlay.text = "\n".join(lines)
@@ -520,6 +550,7 @@ def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
             ctrl.set_box(box, "keys")
         refresh()
 
+    ctrl.refresh = refresh
     ctrl.listeners.append(lambda box, source: refresh())
     v.dims.events.point.connect(refresh)
     undo(lambda: v.dims.events.point.disconnect(refresh))
@@ -594,8 +625,8 @@ def launch_gui(store: str | None = None, t: int = 0, level: int | None = None,
             "caller_cwd": str(CALLER_CWD), "include_lysed": include_lysed,
         }
         open_viewer(prep["sub"], prep["chans"], prep["nap_scale"], prep["nap_translate"],
-                    prep["um"], prep["extent"], viewer=v, crop_ctx=ctx,
-                    title=f"{pathlib.Path(store_).name} · t{prep['t']} · level {prep['level']}")
+                    prep["um"], prep["extent"], viewer=v, crop_ctx=ctx, t=prep["t"],
+                    title=f"{pathlib.Path(store_).name} · level {prep['level']}")
         v._canmac_store = store_
         if keep:
             v._canmac_box.set_box(keep, "code")
@@ -619,7 +650,7 @@ def main(argv=None) -> None:
         description="Preview an OME-Zarr in napari and crop a box from it: choose the dataset "
                     "in the Dataset panel (or pass --store), draw the box, press Crop.")
     ap.add_argument("t", type=int, nargs="?", default=0,
-                    help="Timepoint index to display (default 0).")
+                    help="Timepoint shown first (default 0); the time slider shows the rest.")
     ap.add_argument("--store", default=None,
                     help="raw.zarr root (default: $CANMAC_FULLSTACK_ZARR, else full_stack/raw.zarr; "
                          "if neither exists the GUI asks you to choose a folder)")
@@ -663,6 +694,7 @@ def main(argv=None) -> None:
                ndisplay=3 if args.three_d else 2, panel=not args.no_panel)
     print("\nIn the viewer: choose / switch the dataset in the Dataset panel (right), draw the")
     print("box (Crop panel: Draw box), set Z with Start here / End here, press Crop.")
+    print("The first slider under the image is time: press its play button to watch the movie.")
     print("The view is 2D; the 2D/3D button toggles 3D. If that crashes, your OpenGL can't")
     print("volume-render (guide: vglrun or LIBGL_ALWAYS_SOFTWARE=1).")
     import napari

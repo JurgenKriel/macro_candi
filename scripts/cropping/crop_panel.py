@@ -96,7 +96,9 @@ class DatasetPanel(QWidget):
         row = QHBoxLayout()
         row.addWidget(QLabel("Timepoint"))
         self.t = QSpinBox()
-        self.t.setToolTip("Which timepoint to look at (the Crop panel's time range starts here)")
+        self.t.setToolTip("Timepoint on screen: the same as the time slider under the image "
+                          "(its play button plays the movie)")
+        self.t.valueChanged.connect(self._t_to_slider)
         row.addWidget(self.t)
         row.addWidget(QLabel("Preview level"))
         self.level = QSpinBox()
@@ -104,7 +106,8 @@ class DatasetPanel(QWidget):
                               "Crops are always written at full resolution.")
         row.addWidget(self.level)
         self.show_btn = QPushButton("Show")
-        self.show_btn.setToolTip("Reload at this timepoint / level (the crop box is kept)")
+        self.show_btn.setToolTip("Reload at this preview level (the crop box and timepoint "
+                                 "are kept)")
         self.show_btn.clicked.connect(
             lambda: self.open_path(self.store, t=self.t.value(), level=self.level.value()))
         row.addWidget(self.show_btn)
@@ -117,12 +120,25 @@ class DatasetPanel(QWidget):
         lay.addWidget(self.msg)
         _fluid(self.intro, self.info, self.msg)
         self._set_loaded(False)
+        viewer.dims.events.point.connect(self._t_from_slider)
 
     # ---------------- state ----------------
     def _set_loaded(self, loaded: bool):
         for w in self.view_row:
             w.setEnabled(loaded)
         self.intro.setVisible(not loaded)
+
+    def _t_to_slider(self, t: int):
+        if self.store is not None and self.v.dims.ndim > 3:
+            self.v.dims.set_point(0, t)
+
+    def _t_from_slider(self, *_):
+        if self.store is not None and self.v.dims.ndim > 3:
+            t = int(round(self.v.dims.point[0]))
+            if t != self.t.value():
+                self.t.blockSignals(True)
+                self.t.setValue(t)
+                self.t.blockSignals(False)
 
     def _fill_recent(self):
         self.recent_box.clear()
@@ -185,8 +201,10 @@ class DatasetPanel(QWidget):
             f"{um['x']:g} µm · {prep['n_t']} timepoint{'s' if prep['n_t'] != 1 else ''} · "
             f"{len(prep['chans'])} channel{'s' if len(prep['chans']) != 1 else ''} · "
             f"{n_lv} pyramid level{'s' if n_lv != 1 else ''}")
+        self.t.blockSignals(True)
         self.t.setRange(0, prep["n_t"] - 1)
         self.t.setValue(prep["t"])
+        self.t.blockSignals(False)
         self.level.setRange(0, n_lv - 1)
         self.level.setValue(prep["level"])
         self._set_loaded(True)
@@ -247,7 +265,9 @@ class CropPanel(QWidget):
             "over opposite corners.<br>"
             "<b>2.</b> Scroll Z and click <b>Start here</b> / <b>End here</b>. The box is "
             "yellow on slices inside the Z range, grey outside.<br>"
-            "<b>3.</b> Choose time, channels and output, then <b>Crop</b>.")
+            "<b>3.</b> Time: play or drag the <b>t</b> slider under the image and click "
+            "<b>From here</b> / <b>To here</b> (the box is grey at timepoints outside the "
+            "range). Choose channels and output, then <b>Crop</b>.")
         steps.setWordWrap(True)
         lay.addWidget(steps)
 
@@ -305,11 +325,19 @@ class CropPanel(QWidget):
         grid.addWidget(self.t0, 0, 1)
         grid.addWidget(QLabel("to (not incl.)"), 0, 2)
         grid.addWidget(self.t1, 0, 3)
+        self.t_start = QPushButton("From here")
+        self.t_start.setToolTip("Time range starts at the timepoint on screen (t slider)")
+        self.t_start.clicked.connect(lambda: self._t_here(0))
+        self.t_end = QPushButton("To here")
+        self.t_end.setToolTip("Time range ends at the timepoint on screen (included)")
+        self.t_end.clicked.connect(lambda: self._t_here(1))
+        grid.addWidget(self.t_start, 1, 1)
+        grid.addWidget(self.t_end, 1, 3)
         self.all_t = QPushButton(f"All {n_t}")
         self.all_t.clicked.connect(lambda: (self.t0.setValue(0), self.t1.setValue(n_t)))
-        grid.addWidget(self.all_t, 1, 3)
+        grid.addWidget(self.all_t, 2, 3)
         self.t_label = QLabel("")
-        grid.addWidget(self.t_label, 1, 0, 1, 3)
+        grid.addWidget(self.t_label, 2, 0, 1, 3)
         lay.addWidget(g)
 
         # ---- channels ----
@@ -431,9 +459,19 @@ class CropPanel(QWidget):
             box[d] = (lo, hi)
         self.ctrl.set_box(box, "spins")
 
+    def _t_here(self, which: int):
+        t = self.ctrl.current_t()
+        if which == 0:
+            self.t0.setValue(t)  # _t_changed keeps t1 > t0
+        else:
+            self.t1.setValue(t + 1)
+            if self.t0.value() > t:
+                self.t0.setValue(t)
+
     def _t_changed(self, *_):
         if self.t1.value() <= self.t0.value():
             self.t1.setValue(self.t0.value() + 1)
+        self.ctrl.set_t_range(self.t0.value(), self.t1.value())
         n = self.t1.value() - self.t0.value()
         self.t_label.setText(f"{n} timepoint{'s' if n != 1 else ''}")
         if self._out_auto:
