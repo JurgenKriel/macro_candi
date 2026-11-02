@@ -1,42 +1,41 @@
 #!/usr/bin/env python
-"""Preview a candidate ROI of the full_stack OME-Zarr in napari (read-only).
+"""Preview the full_stack OME-Zarr in napari and crop a box from it (the crop GUI).
 
-Opens ONE timepoint of a coordinate-defined sub-volume as lazy dask layers so you
-can confirm a crop box in 3D before anything is written. Writes NOTHING to disk —
-no zarr, no tiff, no cache. Run this, agree on a box, then hand the same numbers
-to the cropper.
+Opens ONE timepoint at ONE pyramid level as lazy dask layers (only the planes on screen
+are read), in 2D. Draw the crop box on the "crop box" layer, set its Z range, time
+range, channels and output in the Crop panel on the right, and press Crop: the box is
+written at full resolution by 12_crop_roi.write_crop on a background thread. Nothing is
+written until you press Crop. ``12_crop_roi.py --gui`` launches exactly this.
 
-Usage (from a desktop session with a display — VNC / OpenOnDemand):
+Usage (from a desktop session with a display: VNC / OpenOnDemand / Strudel):
     S=scripts/cropping/11_preview_crop.py
     pixi run python $S 0                                       # whole volume, coarse level
-    pixi run python $S 0 --x0 1200 --x1 2700 --y0 300 --y1 1800
-    pixi run python $S 0 --x0 1200 --x1 2700 --level 0         # native resolution
-    pixi run python $S 0 --check                               # size table only, no GUI
     pixi run python $S 0 --store data/demo/DEMO/raw.zarr       # practise on the demo store
+    pixi run python $S 0 --x0 1200 --x1 2700 --y0 300 --y1 1800 --level 0   # finer look at a region
+    pixi run python $S 0 --3d                                  # start in the 3D view
+    pixi run python $S 0 --no-panel                            # view only
+    pixi run python $S 0 --check                               # size table only, no GUI
 
 Guide: https://jurgenkriel.github.io/macro_candi/pipeline/04-cropping/
 
-COORDINATES ARE ALWAYS LEVEL-0 (NATIVE) VOXELS, whatever --level you preview at.
-The box is rescaled onto the previewed level for you, so the numbers you settle on
-here mean the same thing to the cropper regardless of the level you eyeballed them
-at. Omitted bounds default to the full extent of that axis.
+COORDINATES ARE ALWAYS LEVEL-0 (NATIVE) VOXELS, whatever --level you preview at: layers
+are scaled and translated so napari world coordinates are micrometres in the whole
+volume, and every box (drawn, typed, J / K, flags) is converted to level-0 voxels. The
+overlay in the top-left shows the cursor in level-0 voxels (napari's own status bar
+shows pixel indices of the previewed layer, which are NOT the numbers the cropper wants).
+J / K over opposite corners also set the box (not 1 / 2: napari binds those to the image
+layer's pan-zoom / transform modes).
 
-Reading positions: the overlay in the top-left of the viewer shows the cursor in LEVEL-0
-voxels (napari's own status bar shows pixel indices of the previewed layer, which are
-NOT the numbers the cropper wants). In 2D mode, press J over one corner of the box you
-want and K over the opposite corner (scroll Z in between for a Z range); the box is drawn
-in yellow and the matching --x0 ... --z1 flags are printed in the terminal, ready to paste.
-(Not 1 / 2: napari binds those to the image layer's pan-zoom / transform modes.)
+Opens in 2D because 2D needs no 3D textures: napari's 3D volume view segfaults on remote
+desktops without GPU-routed OpenGL. Use --3d / the 2D/3D button only where that works
+(vglrun, or LIBGL_ALWAYS_SOFTWARE=1).
+
+Why crop: Microscopy Nodes builds float32 VDBs and Blender's EEVEE/viewport tops out
+around 4 GiB per volume grid (blender/blender#136263). The full level-0 stack is
+11.6 GiB per channel. Cropping keeps native resolution and gets under the ceiling; the
+Crop panel (and --check) tells you whether the box fits.
 
 Relative --store paths are resolved against the directory you run the command from.
-
-Why this matters: Microscopy Nodes builds float32 VDBs and Blender's EEVEE/viewport
-tops out around 4 GiB per volume grid (blender/blender#136263). The full level-0
-stack is 11.6 GiB per channel, so it cannot be displayed whole. Cropping keeps
-native resolution and gets under the ceiling; the size table printed below tells
-you whether the box you picked actually fits.
-
---check   print the size table only, no napari GUI (headless / over ssh).
 """
 
 from __future__ import annotations
@@ -179,17 +178,107 @@ def box_flags(box: dict) -> str:
     return " ".join(f"--{d}0 {box[d][0]} --{d}1 {box[d][1]}" for d in "xyz")
 
 
+def box_to_rect(box: dict, um: dict) -> list:
+    """Level-0 box -> napari rectangle [[y, x], [y, x]] in world um.
+
+    Voxel i covers [i - 0.5, i + 0.5) * um in world space, so the edges sit between voxels.
+    """
+    return [[(box["y"][0] - 0.5) * um["y"], (box["x"][0] - 0.5) * um["x"]],
+            [(box["y"][1] - 0.5) * um["y"], (box["x"][1] - 0.5) * um["x"]]]
+
+
+def shape_to_yx(points_yx, um: dict, extent: dict) -> dict:
+    """Any drawn shape (vertices in world um, last two columns y, x) -> its level-0
+    bounding box {"y": (lo, hi), "x": (lo, hi)}, hi exclusive, clamped, >= 1 voxel.
+    Inverse of box_to_rect for rectangles."""
+    pts = np.asarray(points_yx, dtype=float)[:, -2:]
+    out = {}
+    eps = 1e-6  # world -> voxel float noise must not push an exact edge into the next voxel
+    for k, d in enumerate("yx"):
+        # voxel i spans [i - 0.5, i + 0.5) * um: lo = voxel holding the min, hi = one past
+        # the voxel holding the max (an edge exactly on a voxel boundary stays outside)
+        lo = int(np.floor(pts[:, k].min() / um[d] + 0.5 + eps))
+        hi = int(np.ceil(pts[:, k].max() / um[d] + 0.5 - eps))
+        lo = min(max(0, lo), extent[d] - 1)
+        hi = min(max(lo + 1, hi), extent[d])
+        out[d] = (lo, hi)
+    return out
+
+
+class BoxController:
+    """The one crop box (level-0 voxels) shared by the drawn shape, the J / K keys and the
+    Crop panel. ``set_box`` updates every view except the one the change came from."""
+
+    def __init__(self, viewer, layer, um: dict, extent: dict):
+        self.v, self.layer, self.um, self.extent = viewer, layer, um, extent
+        self.box = None
+        self.listeners = []  # fn(box, source)
+        self._guard = False
+
+    def current_z(self) -> int:
+        return int(np.clip(round(self.v.dims.point[0] / self.um["z"]), 0, self.extent["z"] - 1))
+
+    def set_box(self, box, source: str = "code"):
+        if box is not None:
+            box = {d: (int(box[d][0]), int(box[d][1])) for d in "zyx"}
+        self.box = box
+        if source != "shape":
+            self._guard = True
+            try:
+                self.layer.data = []
+                if box is not None:
+                    self.layer.add_rectangles([box_to_rect(box, self.um)])
+            finally:
+                self._guard = False
+        self.recolor()
+        for fn in list(self.listeners):
+            fn(box, source)
+
+    def recolor(self, *_):
+        """Yellow on slices inside the box's Z range, grey outside: the 3D extent at a glance."""
+        if self.box is None or not len(self.layer.data):
+            return
+        z0, z1 = self.box["z"]
+        inside = z0 <= self.current_z() < z1
+        self.layer.edge_color = "yellow" if inside else "gray"
+        self.layer.opacity = 1.0 if inside else 0.6
+
+    def on_shape_event(self, event=None):
+        """User drew / edited / deleted a shape: take the last one's bounding box."""
+        if self._guard:
+            return
+        action = str(getattr(event, "action", "changed")).lower()
+        if "ing" in action:  # 'adding' / 'changing' / 'removing': wait for the end
+            return
+        if not len(self.layer.data):
+            self.box = None
+            for fn in list(self.listeners):
+                fn(None, "shape")
+            return
+        yx = shape_to_yx(self.layer.data[-1], self.um, self.extent)
+        z = self.box["z"] if self.box else (0, self.extent["z"])
+        box = {"z": z, **yx}
+        # normalise to ONE axis-aligned rectangle (crops are boxes), after napari finishes
+        from qtpy.QtCore import QTimer
+        QTimer.singleShot(0, lambda: self.set_box(box, "shape-normalised"))
+        self.box = box
+        for fn in list(self.listeners):
+            fn(box, "shape")
+
+
 def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
-                title: str = "ROI preview", show: bool = True, ndisplay: int = 2):
-    """Build the napari viewer: one layer per channel, a live level-0 cursor readout and
-    two-key corner picking (J / K) that draws the box and prints ready-to-paste crop flags.
+                title: str = "ROI preview", show: bool = True, ndisplay: int = 2,
+                crop_ctx: dict | None = None):
+    """Build the napari viewer: one layer per channel, a live level-0 cursor readout, an
+    editable "crop box" shapes layer, J / K corner picking and (with ``crop_ctx``) the Crop
+    panel that writes the crop. Draw, J / K and the panel all edit one box.
 
     Layers carry ``scale`` (um/voxel at the previewed level) and ``translate`` (the box's
     offset in um), so napari WORLD coordinates are absolute micrometres in the whole
     volume and ``world_um / um[d]`` is the level-0 voxel index whatever box or level is
     on screen. Returned unshown when ``show=False`` (tests).
 
-    Opens in 2D by default: corners are picked in 2D, and 2D needs no 3D textures, so it
+    Opens in 2D by default: boxes are drawn in 2D, and 2D needs no 3D textures, so it
     also works on remote desktops whose OpenGL segfaults on volume rendering.
     """
     import napari
@@ -212,6 +301,18 @@ def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
     v.axes.visible = True
     v.axes.labels = True
 
+    # a 2D shapes layer is broadcast over Z: the rectangle shows on every slice
+    layer = v.add_shapes(None, ndim=2, name="crop box", edge_color="yellow",
+                         face_color="transparent", edge_width=2 * um["x"],
+                         units=("um", "um"))
+    layer.current_edge_color = "yellow"
+    layer.current_face_color = "transparent"
+    layer.current_edge_width = 2 * um["x"]
+    ctrl = BoxController(v, layer, um, extent)
+    layer.events.data.connect(ctrl.on_shape_event)
+    v.dims.events.point.connect(ctrl.recolor)  # `point` is a real field in napari >= 0.8
+    v.layers.selection.active = v.layers[0]  # image active: J / K and panning work at once
+
     picked: dict = {}
 
     def cursor_vox0() -> dict:
@@ -224,15 +325,17 @@ def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
         c = cursor_vox0()
         lines = [f"cursor (level-0 voxels)   x {c['x']}   y {c['y']}   z {c['z']}"]
         if v.dims.ndisplay == 3:
-            lines.append("3D view: positions are approximate - switch to 2D to pick corners")
+            lines.append("3D view: positions are approximate - switch to 2D to draw the box")
         for key in ("1", "2"):
             if key in picked:
                 p = picked[key]
                 lines.append(f"corner {key}:  x {p['x']}  y {p['y']}  z {p['z']}")
-        if len(picked) == 2:
-            lines.append(box_flags(corners_to_box(picked["1"], picked["2"], extent)))
+        if ctrl.box is not None:
+            z0, z1 = ctrl.box["z"]
+            where = "inside" if z0 <= ctrl.current_z() < z1 else "OUTSIDE"
+            lines.append(f"box: {box_flags(ctrl.box)}   (this slice is {where} z {z0}-{z1 - 1})")
         else:
-            lines.append("press J / K to mark opposite corners of the crop box")
+            lines.append("draw a rectangle on 'crop box', or press J / K on opposite corners")
         v.text_overlay.text = "\n".join(lines)
 
     def pick(key: str):
@@ -240,24 +343,13 @@ def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
         p = picked[key]
         print(f"corner {key}: x {p['x']}  y {p['y']}  z {p['z']}   (level-0 voxels)")
         if len(picked) == 2:
-            flags = box_flags(corners_to_box(picked["1"], picked["2"], extent))
-            print(f"\ncrop box flags:\n  {flags}\n")
-            show_box(corners_to_box(picked["1"], picked["2"], extent))
+            box = corners_to_box(picked["1"], picked["2"], extent)
+            print(f"\ncrop box flags:\n  {box_flags(box)}\n")
+            ctrl.set_box(box, "keys")
         refresh()
 
-    def show_box(box: dict):
-        """Outline the picked box in Y/X (drawn on every Z slice) as a yellow rectangle."""
-        # voxel i covers [i - 0.5, i + 0.5) * um in world space, so edges sit between voxels
-        rect = [[(box["y"][0] - 0.5) * um["y"], (box["x"][0] - 0.5) * um["x"]],
-                [(box["y"][1] - 0.5) * um["y"], (box["x"][1] - 0.5) * um["x"]]]
-        if "crop box" in v.layers:
-            v.layers["crop box"].data = [rect]
-        else:
-            v.add_shapes([rect], shape_type="rectangle", name="crop box", ndim=2,
-                         edge_color="yellow", face_color="transparent",
-                         edge_width=2 * um["x"], units=("um", "um"))
-            v.layers.selection.active = v.layers[0]  # shapes-layer keys stay out of the way
-
+    ctrl.listeners.append(lambda box, source: refresh())
+    v.dims.events.point.connect(refresh)
     # J / K, not 1 / 2: the active layer's keymap wins over the viewer's, and napari
     # binds 1 / 2 on image layers to pan-zoom / transform mode.
     v.bind_key("j", lambda _v: pick("1"), overwrite=True)
@@ -269,18 +361,31 @@ def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
     v.text_overlay.font_size = 10
     refresh()
     v._canmac_pick = pick  # exposed for tests
+    v._canmac_box = ctrl
+
+    if crop_ctx is not None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_crop_panel", pathlib.Path(__file__).resolve().with_name("crop_panel.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        panel = mod.CropPanel(v, ctrl, crop_ctx)
+        v.window.add_dock_widget(panel, name="Crop", area="right")
+        v._canmac_panel = panel
     return v
 
 
-def main() -> None:
+def main(argv=None) -> None:
     ap = argparse.ArgumentParser(
-        description="Preview a coordinate-defined ROI of the full_stack in napari (writes nothing).")
-    ap.add_argument("t", type=int, help="Timepoint index (e.g. 0).")
+        description="Preview the full_stack in napari and crop a box from it: draw the box, "
+                    "set Z / time / channels in the Crop panel, press Crop.")
+    ap.add_argument("t", type=int, help="Timepoint index to display (e.g. 0).")
     ap.add_argument("--store", default=None,
                     help="raw.zarr root (default: $CANMAC_FULLSTACK_ZARR, else full_stack/raw.zarr)")
     ap.add_argument("--level", type=int, default=None,
                     help="pyramid level to PREVIEW at; 0=native (default: 2, or the coarsest "
-                         "level if the store has fewer)")
+                         "level if the store has fewer). Crops are always written at level 0")
     ap.add_argument("--channels", default="all",
                     help="'all', or comma-separated names (candida,macrophage) / indices")
     ap.add_argument("--include-lysed", action="store_true", dest="include_lysed",
@@ -293,9 +398,11 @@ def main() -> None:
     ap.add_argument("--3d", action="store_true", dest="three_d",
                     help="open in 3D (volume rendering) instead of 2D slices. Needs working "
                          "OpenGL: on a remote desktop use vglrun, or LIBGL_ALWAYS_SOFTWARE=1")
+    ap.add_argument("--no-panel", action="store_true", dest="no_panel",
+                    help="view only: no Crop panel")
     ap.add_argument("--check", action="store_true",
                     help="print the size table only, do not open napari.")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     args.store = user_path(args.store, DEFAULT_STORE)
 
     if not os.path.isdir(args.store):
@@ -358,19 +465,27 @@ def main() -> None:
     print(f"\npreviewing level {args.level}: {sub.shape} (lazy)  "
           f"voxel {tuple(round(s, 4) for s in nap_scale)} um")
 
-    v = open_viewer(sub, chans, nap_scale, nap_translate, um,
-                    {d: axis_len(axes, shape0, d) for d in "zyx"},
+    extent = {d: axis_len(axes, shape0, d) for d in "zyx"}
+    ctx = None if args.no_panel else {
+        "store": args.store, "levels": levels, "axes": axes, "omero": omero,
+        "chans": chans, "t": args.t, "n_t": n_t, "extent": extent, "um": um,
+        "caller_cwd": str(CALLER_CWD), "include_lysed": args.include_lysed,
+    }
+    v = open_viewer(sub, chans, nap_scale, nap_translate, um, extent,
                     title=f"ROI preview  L{args.level}  t{args.t}",
-                    ndisplay=3 if args.three_d else 2)
+                    ndisplay=3 if args.three_d else 2, crop_ctx=ctx)
     print("\nIn the viewer (2D): move the Z slider under the image; the top-left overlay")
-    print("shows the cursor in LEVEL-0 voxels. The 2D/3D button (bottom-left) toggles a 3D")
-    print("view; if that crashes, your OpenGL can't volume-render (see the guide's")
-    print("troubleshooting: vglrun or LIBGL_ALWAYS_SOFTWARE=1). Press J on one")
-    print("corner and K on the opposite corner (on different Z slices for a Z range) and the")
-    print("crop flags are printed here, ready to paste. Then: 12_crop_roi.py ... --dry-run")
+    print("shows the cursor in LEVEL-0 voxels.")
+    if ctx is not None:
+        print("Crop panel (right): 'Draw box', drag a rectangle, set Z start/end on the")
+        print("slices you want, choose time/channels/output, press Crop.")
+    print("Keys: J / K over opposite corners also set the box. The 2D/3D button toggles a")
+    print("3D view; if that crashes, your OpenGL can't volume-render (guide: vglrun or")
+    print("LIBGL_ALWAYS_SOFTWARE=1).")
     import napari
 
     napari.run()
+
 
 if __name__ == "__main__":
     main()
