@@ -180,7 +180,7 @@ def box_flags(box: dict) -> str:
 
 
 def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
-                title: str = "ROI preview", show: bool = True):
+                title: str = "ROI preview", show: bool = True, ndisplay: int = 2):
     """Build the napari viewer: one layer per channel, a live level-0 cursor readout and
     two-key corner picking (J / K) that draws the box and prints ready-to-paste crop flags.
 
@@ -188,11 +188,14 @@ def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
     offset in um), so napari WORLD coordinates are absolute micrometres in the whole
     volume and ``world_um / um[d]`` is the level-0 voxel index whatever box or level is
     on screen. Returned unshown when ``show=False`` (tests).
+
+    Opens in 2D by default: corners are picked in 2D, and 2D needs no 3D textures, so it
+    also works on remote desktops whose OpenGL segfaults on volume rendering.
     """
     import napari
     from napari.utils.colormaps import Colormap
 
-    v = napari.Viewer(ndisplay=3, title=title, show=show)
+    v = napari.Viewer(ndisplay=ndisplay, title=title, show=show)
     for i, label, color in chans:
         kw = {}
         if color:
@@ -287,6 +290,9 @@ def main() -> None:
                         help=f"{ax} start in LEVEL-0 voxels (default: 0)")
         ap.add_argument(f"--{ax}1", type=int, default=None,
                         help=f"{ax} stop in LEVEL-0 voxels (default: full extent)")
+    ap.add_argument("--3d", action="store_true", dest="three_d",
+                    help="open in 3D (volume rendering) instead of 2D slices. Needs working "
+                         "OpenGL: on a remote desktop use vglrun, or LIBGL_ALWAYS_SOFTWARE=1")
     ap.add_argument("--check", action="store_true",
                     help="print the size table only, do not open napari.")
     args = ap.parse_args()
@@ -354,9 +360,12 @@ def main() -> None:
 
     v = open_viewer(sub, chans, nap_scale, nap_translate, um,
                     {d: axis_len(axes, shape0, d) for d in "zyx"},
-                    title=f"ROI preview  L{args.level}  t{args.t}")
-    print("\nIn the viewer: switch to 2D (bottom-left 2D/3D button), move the Z slider,")
-    print("and the top-left overlay shows the cursor in LEVEL-0 voxels. Press J on one")
+                    title=f"ROI preview  L{args.level}  t{args.t}",
+                    ndisplay=3 if args.three_d else 2)
+    print("\nIn the viewer (2D): move the Z slider under the image; the top-left overlay")
+    print("shows the cursor in LEVEL-0 voxels. The 2D/3D button (bottom-left) toggles a 3D")
+    print("view; if that crashes, your OpenGL can't volume-render (see the guide's")
+    print("troubleshooting: vglrun or LIBGL_ALWAYS_SOFTWARE=1). Press J on one")
     print("corner and K on the opposite corner (on different Z slices for a Z range) and the")
     print("crop flags are printed here, ready to paste. Then: 12_crop_roi.py ... --dry-run")
     import napari

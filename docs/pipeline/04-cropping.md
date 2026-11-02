@@ -77,14 +77,19 @@ pixi run python scripts/cropping/11_preview_crop.py 0
 
 `0` is the timepoint. With no box flags you get the whole volume at a coarse pyramid level
 (level 2, or the coarsest available), which is fast enough to look around in. A napari window
-opens with one layer per channel (*Candida* in red, macrophages in green) shown as a maximum
-intensity projection in 3D.
+opens with one layer per channel (*Candida* in red, macrophages in green), showing **one Z
+slice at a time** (2D). That is where you pick corners, and it works on any remote desktop.
+
+For an overview of the whole volume, click the **2D/3D** button (bottom-left) or start with
+`--3d`. This renders a 3D maximum intensity projection and needs working OpenGL; see
+[the segfault entry](#troubleshooting) if napari crashes.
 
 <figure markdown="span">
   ![napari preview window showing the whole demo volume in 3D: layer controls and layer list on the left, green macrophages and red Candida on the canvas, and a text overlay in the top-left corner](../assets/cropping/01-overview-3d.png){ loading=lazy }
-  <figcaption>What opens: layer controls (top-left panel), one layer per channel (layer list),
-  and the <b>cursor overlay</b> (top-left of the canvas) that reports positions in level-0
-  voxels. In 3D it reminds you to switch to 2D before picking corners.</figcaption>
+  <figcaption>The 3D view (<code>--3d</code> or the 2D/3D button): layer controls (top-left
+  panel), one layer per channel (layer list), and the <b>cursor overlay</b> (top-left of the
+  canvas) that reports positions in level-0 voxels. In 3D it reminds you to switch back to 2D
+  before picking corners.</figcaption>
 </figure>
 
 The terminal shows a summary first. This is real output from the demo store:
@@ -138,7 +143,7 @@ Reading positions:
 
 To pick a box:
 
-1. Switch to **2D** (in 3D, the cursor depth is ambiguous and the overlay warns you).
+1. Be in **2D**, the default (in 3D the cursor depth is ambiguous and the overlay warns you).
 2. Scroll to a Z slice at one end of the region and hover over one corner. Press ++j++.
 3. Scroll to the other end in Z, hover over the opposite corner and press ++k++.
 4. A **yellow rectangle** shows the box in X/Y on every slice, the overlay lists both corners
@@ -188,7 +193,7 @@ the region looks right.
 
 <figure markdown="span">
   ![napari 3D view of only the cropped box at full resolution: one macrophage containing a yeast, a hypha extending from it, and part of a second macrophage cut by the box edge](../assets/cropping/04-confirm-box-3d.png){ loading=lazy }
-  <figcaption>The same box re-opened at <code>--level 0</code>: only the region you will crop
+  <figcaption>The same box re-opened at <code>--level 0 --3d</code>: only the region you will crop
   is loaded. Here the box clips the right-hand macrophage. Widen <code>--x1</code> if you
   want all of it.</figcaption>
 </figure>
@@ -329,6 +334,7 @@ them from the `channel:` line of the summary.
 | `--level N` | 2, or the coarsest level available | Pyramid level to *display*. Doesn't change the meaning of the box |
 | `--channels` | `all` | See [Choosing channels](#choosing-channels) |
 | `--include-lysed` | off | Also show the lysed-cell channel |
+| `--3d` | off (opens in 2D) | Open in the 3D volume view. Needs working OpenGL (see [troubleshooting](#troubleshooting)) |
 | `--check` | off | Print the summary and size table only; no window |
 
 In the viewer: ++j++ / ++k++ mark opposite corners (2D mode) and draw the box in yellow; the
@@ -385,6 +391,22 @@ top-left overlay shows the cursor in level-0 voxels.
     A single channel at a single timepoint is too big for Blender's viewport/EEVEE. Shrink
     the box (Z depth is often the easiest to give up; see the [sizing table](#4-check-that-it-fits-in-blender)),
     or render with **Cycles**, which does not have this limit but is slower.
+
+??? failure "`Error drawing visual <Volume …>` then `Segmentation fault (core dumped)`"
+    napari's 3D view needs OpenGL that can render 3D textures, and the remote desktop's
+    graphics stack can't. Common on VNC/Strudel/OpenOnDemand desktops that aren't routed
+    through the GPU. The data and the script are fine. In order of preference:
+
+    1. **Stay in 2D.** The preview opens in 2D by default and corner picking only needs 2D;
+       just don't press the 2D/3D button or pass `--3d`.
+    2. **On a GPU desktop, use VirtualGL:**
+       `vglrun pixi run python scripts/cropping/11_preview_crop.py 0 --3d`
+    3. **Anywhere, use Mesa's software renderer** (slower; fine for a coarse level or a small box):
+       `LIBGL_ALWAYS_SOFTWARE=1 pixi run python scripts/cropping/11_preview_crop.py 0 --3d`
+
+    To see what you have: `glxinfo -B | grep -iE "renderer|version"`. A renderer of
+    `llvmpipe` is software rendering (works, slowly); an OpenGL version below 3 or an error
+    means 3D won't work without option 2 or 3.
 
 ??? question "The preview is very slow"
     Level 0 of a big box reads a lot of data. Preview at a coarser `--level` (1 or 2) to pick
