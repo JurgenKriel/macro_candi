@@ -266,17 +266,180 @@ class BoxController:
             fn(box, "shape")
 
 
+class LoadError(Exception):
+    """A dataset could not be opened. The message is written for the person at the GUI."""
+
+
+def _is_store(d: pathlib.Path) -> bool:
+    """bioformats2raw-layout OME-Zarr: <d>/0/.zattrs holds the multiscales."""
+    f = d / "0" / ".zattrs"
+    if not f.is_file():
+        return False
+    try:
+        return "multiscales" in json.loads(f.read_text())
+    except (OSError, ValueError):
+        return False
+
+
+def find_store(path) -> str:
+    """Resolve whatever the user picked to the OME-Zarr store root, forgivingly.
+
+    Accepts the store itself (``raw.zarr``), anything inside it (``raw.zarr/0``,
+    ``raw.zarr/0/0``, a ``.zattrs`` file) or a folder just above it holding exactly one
+    store (``data/demo`` -> ``data/demo/DEMO/raw.zarr``). Raises LoadError with a
+    plain-language explanation otherwise.
+    """
+    text = str(path).strip().strip("'\"")
+    if not text:
+        raise LoadError("No folder given. Click Browse… or paste the path of the .zarr folder.")
+    p = pathlib.Path(os.path.expanduser(text))
+    if not p.is_absolute():
+        p = CALLER_CWD / p
+    p = p.resolve()
+    if not p.exists():
+        raise LoadError(f"{p} does not exist.")
+    if p.is_file() and not any(part.endswith(".zarr") for part in p.parts):
+        raise LoadError(
+            f"{p.name} is a single file. The cropper reads an OME-Zarr folder (a folder "
+            f"ending in .zarr, such as full_stack/raw.zarr). Convert CZI / TIFF files first: "
+            f"see stage 1, Conversion, in the guide.")
+    start = p if p.is_dir() else p.parent
+    for d in [start, *start.parents][:5]:  # picked something inside the store
+        if _is_store(d):
+            return str(d)
+    found = sorted({c.parent.parent for pat in ("*/0/.zattrs", "*/*/0/.zattrs")
+                    for c in start.glob(pat) if _is_store(c.parent.parent)})
+    if len(found) == 1:  # picked the folder above the store
+        return str(found[0])
+    if found:
+        names = ", ".join(str(f.relative_to(start)) for f in found[:6])
+        raise LoadError(f"{start} holds {len(found)} datasets ({names}"
+                        f"{', …' if len(found) > 6 else ''}). Choose one of them.")
+    if (start / ".zattrs").is_file():
+        raise LoadError(f"{start} is an OME-Zarr image without the bioformats2raw '0/' level; "
+                        f"only bioformats2raw-layout stores (folder/0/…) are supported.")
+    raise LoadError(f"No OME-Zarr dataset found in {start}. Choose the folder ending in .zarr "
+                    f"(it contains a folder called 0).")
+
+
+def prepare(store: str, t: int = 0, level: int | None = None, channels: str = "all",
+            include_lysed: bool = False, box_args: dict | None = None) -> dict:
+    """Open ``store`` lazily at ``level`` / timepoint ``t``: everything a viewer needs.
+
+    ``box_args`` ({"x0": .., "z1": ..}, None = full extent) limits the loaded region.
+    Raises LoadError (never exits) so the GUI can show the problem and carry on.
+    """
+    import dask.array as da
+
+    try:
+        levels, axes, omero = read_multiscale(store)
+    except (OSError, KeyError, ValueError, IndexError) as e:
+        raise LoadError(f"Couldn't read the OME-Zarr metadata in {store}: {e}") from e
+    if not set("zyx") <= set(axes):
+        raise LoadError(f"{store} has axes '{axes}'; the cropper needs z, y and x.")
+    shape0 = levels[0]["shape"]
+    if level is None:
+        level = min(2, len(levels) - 1)
+    if not 0 <= level < len(levels):
+        raise LoadError(f"Preview level {level} doesn't exist: this store has {len(levels)} "
+                        f"level(s), 0..{len(levels) - 1}.")
+    n_t = axis_len(axes, shape0, "t")
+    if not 0 <= t < n_t:
+        raise LoadError(f"Timepoint {t} doesn't exist: this store has {n_t} (0..{n_t - 1}).")
+    ns = argparse.Namespace(**{f"{d}{e}": (box_args or {}).get(f"{d}{e}")
+                               for d in "xyz" for e in "01"})
+    try:
+        chans = select_channels(store, channels, omero, include_lysed)
+        box0 = resolve_box(ns, axes, shape0)
+    except SystemExit as e:  # the CLI helpers exit with a message; the GUI shows it
+        raise LoadError(str(e).removeprefix("ERROR: ")) from None
+    except ValueError as e:  # e.g. an unknown channel name
+        raise LoadError(str(e)) from None
+
+    lv = levels[level]
+    b = scale_box(box0, shape0, lv["shape"], axes)
+    arr = da.from_zarr(store, component=f"0/{lv['path']}")  # lazy: nothing read yet
+    idx = tuple(t if d == "t" else slice(None) if d == "c" else slice(*b[d]) for d in axes)
+    spatial = [d for d in axes if d in "zyx"]
+    return {
+        "store": store, "levels": levels, "axes": axes, "omero": omero, "chans": chans,
+        "shape0": shape0, "level": level, "t": t, "n_t": n_t, "box0": box0,
+        "box_given": any(v is not None for v in vars(ns).values()),
+        "sub": arr[idx],  # (C, Z, Y, X), t dropped
+        "nap_scale": [lv["scale"][axes.index(d)] for d in spatial],
+        # place the box where it sits in the whole volume: napari world coords = absolute um
+        "nap_translate": [b[d][0] * lv["scale"][axes.index(d)] for d in spatial],
+        "um": {d: levels[0]["scale"][axes.index(d)] for d in "xyz"},
+        "extent": {d: axis_len(axes, shape0, d) for d in "zyx"},
+    }
+
+
+def describe(prep: dict, log=print) -> None:
+    """The terminal summary + per-level Blender size table for a prepared dataset."""
+    levels, axes, shape0, chans = prep["levels"], prep["axes"], prep["shape0"], prep["chans"]
+    um, box0 = prep["um"], prep["box0"]
+    log(f"store  : {prep['store']}")
+    log(f"axes   : {axes}   levels: {len(levels)}   level 0: {shape0}")
+    log(f"t      : {prep['t']} of {prep['n_t']}")
+    log("channel: " + ", ".join(f"{i}:{lab}({col})" for i, lab, col in chans))
+    log("\nROI box (level-0 voxels):")
+    for d in "xyz":
+        lo, hi = box0[d]
+        log(f"  {d}: [{lo}:{hi}]  {hi - lo} vox  {(hi - lo) * um[d]:.1f} um")
+    log("\nthis ROI as a float32 VDB (per channel, per timepoint):")
+    log(f"  {'level':>5}  {'z':>5} {'y':>5} {'x':>6}  {'GiB':>7}  vs Blender {BLENDER_LIMIT_GIB:g} GiB")
+    for i, lv in enumerate(levels):
+        b = scale_box(box0, shape0, lv["shape"], axes)
+        d = {k: b[k][1] - b[k][0] for k in "xyz"}
+        gib = d["z"] * d["y"] * d["x"] * VDB_BYTES_PER_VOXEL / 2 ** 30
+        verdict = "fits" if gib <= BLENDER_LIMIT_GIB else f"OVER by {gib / BLENDER_LIMIT_GIB:.1f}x"
+        mark = "  <-- previewing" if i == prep["level"] else ""
+        log(f"  {i:>5}  {d['z']:>5} {d['y']:>5} {d['x']:>6}  {gib:>7.2f}  {verdict:<14}{mark}")
+    log(f"\n  {len(chans)} channel(s) -> {len(chans)} separate volume objects in Microscopy Nodes")
+
+
+_PANEL_MOD = None
+
+
+def _panel_module():
+    """crop_panel.py, loaded once by path (scripts/cropping is not a package)."""
+    global _PANEL_MOD
+    if _PANEL_MOD is None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_crop_panel", pathlib.Path(__file__).resolve().with_name("crop_panel.py"))
+        _PANEL_MOD = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_PANEL_MOD)
+    return _PANEL_MOD
+
+
+def reset_viewer(v) -> None:
+    """Undo open_viewer on ``v`` (callbacks, layers, Crop dock) so another dataset can load."""
+    for undo in reversed(getattr(v, "_canmac_cleanup", [])):
+        try:
+            undo()
+        except Exception:  # noqa: BLE001 - best effort; a stale hook must not block loading
+            pass
+    v._canmac_cleanup = []
+    v.layers.clear()
+    for attr in ("_canmac_box", "_canmac_panel", "_canmac_pick"):
+        if hasattr(v, attr):
+            delattr(v, attr)
+
+
 def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
                 title: str = "ROI preview", show: bool = True, ndisplay: int = 2,
-                crop_ctx: dict | None = None):
-    """Build the napari viewer: one layer per channel, a live level-0 cursor readout, an
+                crop_ctx: dict | None = None, viewer=None):
+    """Fill a napari viewer: one layer per channel, a live level-0 cursor readout, an
     editable "crop box" shapes layer, J / K corner picking and (with ``crop_ctx``) the Crop
     panel that writes the crop. Draw, J / K and the panel all edit one box.
 
     Layers carry ``scale`` (um/voxel at the previewed level) and ``translate`` (the box's
     offset in um), so napari WORLD coordinates are absolute micrometres in the whole
     volume and ``world_um / um[d]`` is the level-0 voxel index whatever box or level is
-    on screen. Returned unshown when ``show=False`` (tests).
+    on screen. A new viewer is made unless ``viewer`` is given (it is then emptied and
+    refilled: how the Dataset panel switches datasets). Unshown when ``show=False``.
 
     Opens in 2D by default: boxes are drawn in 2D, and 2D needs no 3D textures, so it
     also works on remote desktops whose OpenGL segfaults on volume rendering.
@@ -284,7 +447,15 @@ def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
     import napari
     from napari.utils.colormaps import Colormap
 
-    v = napari.Viewer(ndisplay=ndisplay, title=title, show=show)
+    if viewer is None:
+        v = napari.Viewer(ndisplay=ndisplay, title=title, show=show)
+    else:
+        v = viewer
+        reset_viewer(v)
+        v.title = title
+    v._canmac_cleanup = []
+    undo = v._canmac_cleanup.append
+
     for i, label, color in chans:
         kw = {}
         if color:
@@ -311,6 +482,7 @@ def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
     ctrl = BoxController(v, layer, um, extent)
     layer.events.data.connect(ctrl.on_shape_event)
     v.dims.events.point.connect(ctrl.recolor)  # `point` is a real field in napari >= 0.8
+    undo(lambda: v.dims.events.point.disconnect(ctrl.recolor))
     v.layers.selection.active = v.layers[0]  # image active: J / K and panning work at once
 
     picked: dict = {}
@@ -350,39 +522,107 @@ def open_viewer(sub, chans, nap_scale, nap_translate, um: dict, extent: dict,
 
     ctrl.listeners.append(lambda box, source: refresh())
     v.dims.events.point.connect(refresh)
+    undo(lambda: v.dims.events.point.disconnect(refresh))
     # J / K, not 1 / 2: the active layer's keymap wins over the viewer's, and napari
     # binds 1 / 2 on image layers to pan-zoom / transform mode.
     v.bind_key("j", lambda _v: pick("1"), overwrite=True)
     v.bind_key("k", lambda _v: pick("2"), overwrite=True)
     v.mouse_move_callbacks.append(refresh)
+    undo(lambda: v.mouse_move_callbacks.remove(refresh))
     v.dims.events.ndisplay.connect(refresh)
+    undo(lambda: v.dims.events.ndisplay.disconnect(refresh))
     v.text_overlay.visible = True
     v.text_overlay.position = "top_left"
     v.text_overlay.font_size = 10
     refresh()
     v._canmac_pick = pick  # exposed for tests
     v._canmac_box = ctrl
+    if viewer is not None:
+        v.reset_view()
 
     if crop_ctx is not None:
-        import importlib.util
+        from qtpy.QtWidgets import QFrame, QScrollArea
 
-        spec = importlib.util.spec_from_file_location(
-            "_crop_panel", pathlib.Path(__file__).resolve().with_name("crop_panel.py"))
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        panel = mod.CropPanel(v, ctrl, crop_ctx)
-        v.window.add_dock_widget(panel, name="Crop", area="right")
+        panel = _panel_module().CropPanel(v, ctrl, crop_ctx)
+        scroll = QScrollArea()  # scrolls on short screens instead of squashing the controls
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(panel)
+        from qtpy.QtCore import Qt as _Qt
+        scroll.setHorizontalScrollBarPolicy(_Qt.ScrollBarAlwaysOff)  # vertical only
+        scroll.setMinimumWidth(panel.minimumSizeHint().width()
+                               + scroll.verticalScrollBar().sizeHint().width())
+        dock = v.window.add_dock_widget(scroll, name="Crop", area="right")
         v._canmac_panel = panel
+        undo(lambda: v.window.remove_dock_widget(dock))
+        ds_dock = getattr(v, "_canmac_dataset_dock", None)
+        if ds_dock is not None:  # Dataset panel only as tall as it needs; the rest for Crop
+            from qtpy.QtCore import Qt
+            v.window._qt_window.resizeDocks(
+                [ds_dock, dock], [ds_dock.widget().sizeHint().height() + 30, 10_000], Qt.Vertical)
+    return v
+
+
+def launch_gui(store: str | None = None, t: int = 0, level: int | None = None,
+               channels: str = "all", include_lysed: bool = False,
+               box_args: dict | None = None, ndisplay: int = 2, panel: bool = True,
+               show: bool = True):
+    """napari with the Dataset panel (choose / switch the store, timepoint, preview level)
+    and, once a dataset is open, the Crop panel. ``store`` may be None: the window opens
+    empty and asks for one. Box flags pre-fill the crop box for the store they came with."""
+    import napari
+
+    mod = _panel_module()
+    v = napari.Viewer(ndisplay=ndisplay, title="macro_candi · crop", show=show)
+    first = {"store": None, "box_args": box_args}
+
+    def load(path, t_req, level_req):
+        store_ = find_store(path)
+        same = getattr(v, "_canmac_store", None) == store_
+        if first["store"] is None:
+            first["store"] = store_
+        args = first["box_args"] if store_ == first["store"] else None
+        keep = v._canmac_box.box if same and hasattr(v, "_canmac_box") else None
+        prep = prepare(store_, 0 if t_req is None else t_req, level_req, channels,
+                       include_lysed, args)
+        print()
+        describe(prep)
+        ctx = None if not panel else {
+            "store": store_, "levels": prep["levels"], "axes": prep["axes"],
+            "omero": prep["omero"], "chans": prep["chans"], "t": prep["t"],
+            "n_t": prep["n_t"], "extent": prep["extent"], "um": prep["um"],
+            "caller_cwd": str(CALLER_CWD), "include_lysed": include_lysed,
+        }
+        open_viewer(prep["sub"], prep["chans"], prep["nap_scale"], prep["nap_translate"],
+                    prep["um"], prep["extent"], viewer=v, crop_ctx=ctx,
+                    title=f"{pathlib.Path(store_).name} · t{prep['t']} · level {prep['level']}")
+        v._canmac_store = store_
+        if keep:
+            v._canmac_box.set_box(keep, "code")
+        elif prep["box_given"]:
+            v._canmac_box.set_box(prep["box0"], "code")
+        mod.remember(store_)
+        return prep
+
+    ds = mod.DatasetPanel(v, load, t=t, level=level)
+    v._canmac_dataset_dock = v.window.add_dock_widget(ds, name="Dataset", area="right")
+    v._canmac_dataset = ds
+    if store:
+        ds.open_path(store, t=t, level=level)
+    else:
+        ds.waiting()
     return v
 
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(
-        description="Preview the full_stack in napari and crop a box from it: draw the box, "
-                    "set Z / time / channels in the Crop panel, press Crop.")
-    ap.add_argument("t", type=int, help="Timepoint index to display (e.g. 0).")
+        description="Preview an OME-Zarr in napari and crop a box from it: choose the dataset "
+                    "in the Dataset panel (or pass --store), draw the box, press Crop.")
+    ap.add_argument("t", type=int, nargs="?", default=0,
+                    help="Timepoint index to display (default 0).")
     ap.add_argument("--store", default=None,
-                    help="raw.zarr root (default: $CANMAC_FULLSTACK_ZARR, else full_stack/raw.zarr)")
+                    help="raw.zarr root (default: $CANMAC_FULLSTACK_ZARR, else full_stack/raw.zarr; "
+                         "if neither exists the GUI asks you to choose a folder)")
     ap.add_argument("--level", type=int, default=None,
                     help="pyramid level to PREVIEW at; 0=native (default: 2, or the coarsest "
                          "level if the store has fewer). Crops are always written at level 0")
@@ -403,85 +643,28 @@ def main(argv=None) -> None:
     ap.add_argument("--check", action="store_true",
                     help="print the size table only, do not open napari.")
     args = ap.parse_args(argv)
-    args.store = user_path(args.store, DEFAULT_STORE)
-
-    if not os.path.isdir(args.store):
-        sys.exit(f"ERROR: no such store: {args.store}")
-
-    levels, axes, omero = read_multiscale(args.store)
-    shape0 = levels[0]["shape"]
-    if args.level is None:
-        args.level = min(2, len(levels) - 1)
-    if not 0 <= args.level < len(levels):
-        sys.exit(f"ERROR: --level {args.level} but only {len(levels)} levels exist")
-
-    n_t = axis_len(axes, shape0, "t")
-    if not 0 <= args.t < n_t:
-        sys.exit(f"ERROR: timepoint {args.t} out of range 0..{n_t - 1}")
-
-    chans = select_channels(args.store, args.channels, omero, args.include_lysed)
-
-    print(f"store  : {args.store}")
-    print(f"axes   : {axes}   levels: {len(levels)}   level 0: {shape0}")
-    print(f"t      : {args.t} of {n_t}")
-    print(f"channel: " + ", ".join(f"{i}:{lab}({col})" for i, lab, col in chans))
-
-    print("\nROI box (level-0 voxels):")
-    box0 = resolve_box(args, axes, shape0)
-    um = {d: levels[0]["scale"][axes.index(d)] for d in "xyz"}
-    for d in "xyz":
-        lo, hi = box0[d]
-        print(f"  {d}: [{lo}:{hi}]  {hi - lo} vox  {(hi - lo) * um[d]:.1f} um")
-
-    print("\nthis ROI as a float32 VDB (per channel, per timepoint):")
-    print(f"  {'level':>5}  {'z':>5} {'y':>5} {'x':>6}  {'GiB':>7}  vs Blender {BLENDER_LIMIT_GIB:g} GiB")
-    for i, lv in enumerate(levels):
-        b = scale_box(box0, shape0, lv["shape"], axes)
-        d = {k: b[k][1] - b[k][0] for k in "xyz"}
-        gib = d["z"] * d["y"] * d["x"] * VDB_BYTES_PER_VOXEL / 2 ** 30
-        verdict = "fits" if gib <= BLENDER_LIMIT_GIB else f"OVER by {gib / BLENDER_LIMIT_GIB:.1f}x"
-        mark = "  <-- previewing" if i == args.level else ""
-        print(f"  {i:>5}  {d['z']:>5} {d['y']:>5} {d['x']:>6}  {gib:>7.2f}  {verdict:<14}{mark}")
-    print(f"\n  {len(chans)} channel(s) -> {len(chans)} separate volume objects in Microscopy Nodes")
+    explicit = args.store is not None
+    store = user_path(args.store, DEFAULT_STORE)
+    box_args = {f"{d}{e}": getattr(args, f"{d}{e}") for d in "xyz" for e in "01"}
 
     if args.check:
+        try:
+            prep = prepare(find_store(store), args.t, args.level, args.channels,
+                           args.include_lysed, box_args)
+        except LoadError as e:
+            sys.exit(f"ERROR: {e}")
+        describe(prep)
         print("\n--check: skipping napari GUI.")
         return
 
-    # ---- lazy crop: nothing is read until napari asks for a plane ----
-    import dask.array as da
-
-    lv = levels[args.level]
-    b = scale_box(box0, shape0, lv["shape"], axes)
-    arr = da.from_zarr(args.store, component=f"0/{lv['path']}")  # lazy
-    idx = tuple(args.t if d == "t" else slice(None) if d == "c" else slice(*b[d])
-                for d in axes)
-    sub = arr[idx]  # -> (C, Z, Y, X), t dropped
-
-    spatial = [d for d in axes if d in "zyx"]
-    nap_scale = [lv["scale"][axes.index(d)] for d in spatial]
-    # place the box where it sits in the whole volume: napari world coords = absolute um
-    nap_translate = [b[d][0] * lv["scale"][axes.index(d)] for d in spatial]
-    print(f"\npreviewing level {args.level}: {sub.shape} (lazy)  "
-          f"voxel {tuple(round(s, 4) for s in nap_scale)} um")
-
-    extent = {d: axis_len(axes, shape0, d) for d in "zyx"}
-    ctx = None if args.no_panel else {
-        "store": args.store, "levels": levels, "axes": axes, "omero": omero,
-        "chans": chans, "t": args.t, "n_t": n_t, "extent": extent, "um": um,
-        "caller_cwd": str(CALLER_CWD), "include_lysed": args.include_lysed,
-    }
-    v = open_viewer(sub, chans, nap_scale, nap_translate, um, extent,
-                    title=f"ROI preview  L{args.level}  t{args.t}",
-                    ndisplay=3 if args.three_d else 2, crop_ctx=ctx)
-    print("\nIn the viewer (2D): move the Z slider under the image; the top-left overlay")
-    print("shows the cursor in LEVEL-0 voxels.")
-    if ctx is not None:
-        print("Crop panel (right): 'Draw box', drag a rectangle, set Z start/end on the")
-        print("slices you want, choose time/channels/output, press Crop.")
-    print("Keys: J / K over opposite corners also set the box. The 2D/3D button toggles a")
-    print("3D view; if that crashes, your OpenGL can't volume-render (guide: vglrun or")
-    print("LIBGL_ALWAYS_SOFTWARE=1).")
+    if not explicit and not os.path.isdir(store):
+        store = None  # no default dataset here: the GUI asks for one
+    launch_gui(store, args.t, args.level, args.channels, args.include_lysed, box_args,
+               ndisplay=3 if args.three_d else 2, panel=not args.no_panel)
+    print("\nIn the viewer: choose / switch the dataset in the Dataset panel (right), draw the")
+    print("box (Crop panel: Draw box), set Z with Start here / End here, press Crop.")
+    print("The view is 2D; the 2D/3D button toggles 3D. If that crashes, your OpenGL can't")
+    print("volume-render (guide: vglrun or LIBGL_ALWAYS_SOFTWARE=1).")
     import napari
 
     napari.run()

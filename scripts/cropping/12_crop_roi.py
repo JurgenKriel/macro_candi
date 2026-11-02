@@ -5,7 +5,7 @@ Two ways to use it:
 
   GUI (recommended): draw the box in napari, set Z / time / channels in the Crop panel,
   press Crop. Needs a desktop session with a display.
-      pixi run python scripts/cropping/12_crop_roi.py --gui
+      pixi run python scripts/cropping/12_crop_roi.py --gui          # choose the folder in napari
       pixi run python scripts/cropping/12_crop_roi.py --gui --store data/demo/DEMO/raw.zarr
 
   Command line (batch jobs, SSH, scripts): give the level-0 box directly. The GUI's
@@ -231,10 +231,12 @@ def write_crop(store: str, out: str, levels, axes: str, box0: dict, t0: int, t1:
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(
         description="Crop an ROI from full_stack/raw.zarr into a Blender-ready OME-Zarr. "
-                    "Use --gui to draw the box in napari instead of typing coordinates.")
+                    "Use --gui to choose the dataset and draw the box in napari instead of "
+                    "typing paths and coordinates.")
     ap.add_argument("--gui", action="store_true",
-                    help="open the napari crop GUI (draw the box, press Crop). Box/--t0/"
-                         "--channels flags pre-fill it; --out is then optional")
+                    help="open the napari crop GUI: choose the dataset folder in it (or pass "
+                         "--store), draw the box, press Crop. Box/--t0/--channels flags "
+                         "pre-fill it; --out is then optional")
     ap.add_argument("--store", default=None,
                     help="source raw.zarr root (default: $CANMAC_FULLSTACK_ZARR, else full_stack/raw.zarr)")
     ap.add_argument("--out", default=None, help="output .zarr path (required without --gui)")
@@ -261,11 +263,15 @@ def main(argv=None) -> None:
     args = ap.parse_args(argv)
 
     pc = _import_preview()
+    store_given = args.store is not None
     args.store = pc.user_path(args.store, DEFAULT_STORE) if args.store is None else \
         str((CALLER_CWD / os.path.expanduser(args.store)).resolve())
 
     if args.gui:
-        fwd = [str(args.t0), "--store", args.store, "--channels", args.channels]
+        # without --store the GUI opens the default store if there is one, else asks
+        fwd = [str(args.t0), "--channels", args.channels]
+        if store_given:
+            fwd += ["--store", args.store]
         if args.include_lysed:
             fwd.append("--include-lysed")
         for d in "xyz":

@@ -122,3 +122,50 @@ def test_write_crop_matches_source_and_records_box(demo_store, tmp_path):
 
     with pytest.raises(FileExistsError):
         cr.write_crop(str(demo_store), out, levels, axes, box, 3, 9, chans, log=lambda m: None)
+
+
+
+def test_find_store_is_forgiving_about_what_was_picked(demo_store):
+    pc = _load("11_preview_crop")
+    root = str(demo_store.resolve())
+    # the store itself, anything inside it, or the folder just above it
+    for picked in (demo_store, demo_store / "0", demo_store / "0" / "0", demo_store / "0" / ".zattrs",
+                   demo_store.parent, demo_store.parent.parent, f"  '{demo_store}'  "):
+        assert pc.find_store(picked) == root, picked
+
+
+def test_find_store_explains_what_is_wrong(demo_store, tmp_path):
+    import shutil
+
+    pc = _load("11_preview_crop")
+    with pytest.raises(pc.LoadError, match="does not exist"):
+        pc.find_store(tmp_path / "nope")
+    (tmp_path / "movie.czi").write_bytes(b"x")
+    with pytest.raises(pc.LoadError, match="single file.*Convert CZI"):
+        pc.find_store(tmp_path / "movie.czi")
+    (tmp_path / "empty").mkdir()
+    with pytest.raises(pc.LoadError, match="No OME-Zarr dataset found"):
+        pc.find_store(tmp_path / "empty")
+    for name in ("a.zarr", "b.zarr"):
+        shutil.copytree(demo_store, tmp_path / "two" / name)
+    with pytest.raises(pc.LoadError, match=r"holds 2 datasets \(a.zarr, b.zarr\)"):
+        pc.find_store(tmp_path / "two")
+    with pytest.raises(pc.LoadError, match="No folder given"):
+        pc.find_store("  ")
+
+
+def test_prepare_reports_bad_choices_instead_of_exiting(demo_store):
+    pc = _load("11_preview_crop")
+    store = str(demo_store)
+    prep = pc.prepare(store, t=5, level=0, box_args={"x0": 10, "x1": 90})
+    assert prep["n_t"] == 24 and prep["t"] == 5 and prep["box_given"]
+    assert prep["box0"] == {"z": (0, 48), "y": (0, 128), "x": (10, 90)}
+    assert prep["sub"].shape[1:] == (48, 128, 80)  # (C, Z, Y, X) of the box only, still lazy
+    assert [name for _, name, _ in prep["chans"]] == ["candida", "macrophage"]  # lysed decoy skipped
+    assert not pc.prepare(store)["box_given"]
+    with pytest.raises(pc.LoadError, match="Timepoint 24 doesn't exist"):
+        pc.prepare(store, t=24)
+    with pytest.raises(pc.LoadError, match="Preview level 3 doesn't exist"):
+        pc.prepare(store, level=3)
+    with pytest.raises(pc.LoadError):
+        pc.prepare(store, channels="nosuchchannel")

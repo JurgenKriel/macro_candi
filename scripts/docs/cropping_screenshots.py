@@ -25,7 +25,7 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 STORE = str(REPO / "data/demo/DEMO/raw.zarr")
 OUT = REPO / "docs/assets/cropping"
 T = 12
-WINDOW = (1700, 1000)
+WINDOW = (1700, 1100)
 UM = 0.5  # demo voxel size
 
 
@@ -117,12 +117,31 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     for old in OUT.glob("*.png"):
         old.unlink()
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="cropshots_"))
+    os.environ["CANMAC_RECENT_FILE"] = str(tmp / "recent.json")  # leave the real list alone
     crop_mod = _load("12_crop_roi")
     preview_mod = _load("11_preview_crop")
-    tmp = pathlib.Path(tempfile.mkdtemp(prefix="cropshots_"))
 
-    # 1. the GUI in 3D (--3d): a look at the whole volume first
-    v = launch(crop_mod, ["--gui", "--store", STORE, "--t0", str(T)])
+    # 0. `12_crop_roi.py --gui` with no dataset yet: the Dataset panel asks for one
+    v = launch(crop_mod, ["--gui", "--store", str(tmp / "nothing-here")])
+    ds = v._canmac_dataset
+    ds.path.setText("")
+    ds.msg.setText("")
+    shot(v, "00-open-dataset.png")
+
+    # 1. choose the demo folder (the folder above raw.zarr is fine), go to t=12, view in 3D
+    ds.path.setText(str(REPO / "data/demo"))
+    click(ds.open_btn)
+    ds.t.setValue(T)
+    click(ds.show_btn)
+    pump(20)
+    for layer in v.layers:
+        if layer._type_string == "image":
+            lo, hi = np.percentile(np.asarray(layer.data), [90, 99.95])
+            layer.contrast_limits = (float(lo), float(hi))
+    ds.path.setText("data/demo/DEMO/raw.zarr")  # tidy the absolute path for the picture
+    ds._fill_recent()
+    ds.recent_box.setItemText(1, "data/demo/DEMO/raw.zarr")
     v.dims.ndisplay = 3
     v.camera.angles = (-15, 25, 80)
     shot(v, "01-overview-3d.png")
@@ -159,7 +178,8 @@ def main() -> None:
     t_end = time.time() + 300
     while panel.timer.isActive() and time.time() < t_end:
         pump(); time.sleep(0.05)
-    panel.status.setText(panel.status.text().replace(str(tmp), "crops"))  # tidy path
+    panel.status.setText(panel.status.text().replace(  # tidy the path (wraps after each /)
+        str(tmp).replace("/", "/​"), "crops"))
     panel.out.setText("crops/roi_a.zarr")
     shot(v, "04-crop-done.png")
     v.close()
