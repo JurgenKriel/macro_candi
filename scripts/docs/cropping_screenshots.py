@@ -152,24 +152,35 @@ def main() -> None:
     panel = v._canmac_panel
     click(panel.draw_btn)
     drag(v, (12 * UM - UM / 2, 10 * UM - UM / 2), (80 * UM - UM / 2, 90 * UM - UM / 2))
-    v.dims.set_point(0, 8 * UM); pump()
+    v.dims.set_point(1, 8 * UM); pump()
     click(panel.z_start)
-    v.dims.set_point(0, 41 * UM); pump()
+    v.dims.set_point(1, 41 * UM); pump()
     click(panel.z_end)
     v.layers.selection.active = v.layers[0]
-    v.dims.set_point(0, 25 * UM)
-    v.cursor.position = (25 * UM, 34 * UM, 33 * UM)
+    v.dims.set_point(1, 25 * UM)
+    v.cursor.position = (T, 25 * UM, 34 * UM, 33 * UM)
     v.mouse_move_callbacks[-1](v, None)  # the overlay refreshes on mouse move; no mouse here
-    panel.t1.setValue(T + 6)
+    click(panel.t_start)  # time range from the t slider: T .. T+5
+    v.dims.set_point(0, T + 5); pump()
+    click(panel.t_end)
+    v.dims.set_point(0, T); pump()
+    v.mouse_move_callbacks[-1](v, None)
     panel.out.setText("crops/roi_a.zarr")
     panel._out_edited()
     shot(v, "02-draw-box.png")
 
     # 3. a slice outside the Z range: the box turns grey
-    v.dims.set_point(0, 45 * UM)
+    v.dims.set_point(1, 45 * UM)
     v.mouse_move_callbacks[-1](v, None)
     shot(v, "03-outside-z-range.png")
-    v.dims.set_point(0, 25 * UM)
+    v.dims.set_point(1, 25 * UM)
+
+    # 3b. a timepoint after the time range (t slider moved on): grey too, cells have moved
+    v.dims.set_point(0, T + 9)
+    v.mouse_move_callbacks[-1](v, None)
+    shot(v, "03b-outside-time-range.png")
+    v.dims.set_point(0, T)
+    v.mouse_move_callbacks[-1](v, None)
 
     # 4. Crop pressed and finished
     out = tmp / "roi_a.zarr"

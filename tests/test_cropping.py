@@ -160,7 +160,8 @@ def test_prepare_reports_bad_choices_instead_of_exiting(demo_store):
     prep = pc.prepare(store, t=5, level=0, box_args={"x0": 10, "x1": 90})
     assert prep["n_t"] == 24 and prep["t"] == 5 and prep["box_given"]
     assert prep["box0"] == {"z": (0, 48), "y": (0, 128), "x": (10, 90)}
-    assert prep["sub"].shape[1:] == (48, 128, 80)  # (C, Z, Y, X) of the box only, still lazy
+    # (T, C, Z, Y, X): every timepoint (for the time slider), the box only, still lazy
+    assert prep["sub"].shape == (24, 3, 48, 128, 80)
     assert [name for _, name, _ in prep["chans"]] == ["candida", "macrophage"]  # lysed decoy skipped
     assert not pc.prepare(store)["box_given"]
     with pytest.raises(pc.LoadError, match="Timepoint 24 doesn't exist"):
