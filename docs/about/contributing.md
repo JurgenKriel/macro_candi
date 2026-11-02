@@ -49,7 +49,7 @@ sbatch --partition=$CANMAC_PARTITION_GPU --gres=$CANMAC_GRES --wrap \
 | `canmac/io/` | Streaming reader, manifest, channels, calibration, bleaching, atomic writes |
 | `canmac/stages/` | `ingest`, `calibrate`, `segment`, `engulfment`, `hyphae2d`, `hyphae_track` |
 | `scripts/conversion/` | CZI → OME-Zarr → OME-TIFF |
-| `scripts/cropping/` | ROI preview and extraction |
+| `scripts/cropping/` | Crop GUI (`11_preview_crop.py` + `crop_panel.py`) and the crop writer / CLI (`12_crop_roi.py`) |
 | `scripts/slurm/` | SLURM wrappers per stage |
 | `viewers/` | napari viewers |
 | `notebooks/` | Tuning and review notebooks |
@@ -87,7 +87,8 @@ Pushes to `main` that touch `docs/` or `mkdocs.yml` redeploy the site automatica
 ### Screenshots
 
 The napari screenshots in `docs/assets/cropping/` are generated from the synthetic demo by
-driving the real preview viewer, so regenerate them whenever `11_preview_crop.py` changes
+driving the real crop GUI (clicks, drags and key presses), so regenerate them whenever
+`11_preview_crop.py` or `crop_panel.py` changes
 how the viewer looks:
 
 ```bash

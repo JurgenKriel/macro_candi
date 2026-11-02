@@ -100,12 +100,13 @@ Pass partition, GPU and environment on the `sbatch` line, e.g.
 
 ## Cropping scripts
 
-| Script | Writes? | Display? | Purpose |
+| Command | Writes? | Display? | Purpose |
 |---|---|---|---|
-| `scripts/cropping/11_preview_crop.py T` | never | yes (or `--check`) | Look at a box in napari; press ++j++ / ++k++ on opposite corners to draw the box and print crop flags |
-| `scripts/cropping/12_crop_roi.py --out PATH` | `--out` | no | Copy the box (and `--t0`..`--t1`) to a Blender-ready OME-Zarr |
+| `scripts/cropping/12_crop_roi.py --gui` | when you press **Crop** | yes | **Crop GUI:** draw the box in napari, set Z / time / channels / output in the Crop panel, press Crop |
+| `scripts/cropping/11_preview_crop.py T` | when you press **Crop** | yes (or `--check`) | The same window, opened at timepoint `T` (`--no-panel` for view only, `--3d` to start in 3D) |
+| `scripts/cropping/12_crop_roi.py --out PATH` | `--out` | no | Command-line crop of a typed box (and `--t0`..`--t1`); the GUI's **Copy command** produces this line |
 
-Both take `--x0/--x1/--y0/--y1/--z0/--z1` in **level-0 voxels** (stop excluded), plus
+All take `--x0/--x1/--y0/--y1/--z0/--z1` in **level-0 voxels** (stop excluded), plus
 `--channels`, `--include-lysed`, `--level` and `--store` (default `$CANMAC_FULLSTACK_ZARR`, else
 `full_stack/raw.zarr`; relative paths resolve against your current directory). The cropper also
 takes `--t0/--t1`, `--extra-levels`, `--chunk-xy`, `--chunk-z`, `--dry-run` and `--overwrite`.
