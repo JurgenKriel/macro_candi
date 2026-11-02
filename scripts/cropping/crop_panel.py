@@ -9,17 +9,190 @@ stays responsive.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import pathlib
 import threading
 import time
 
 from qtpy.QtCore import Qt, QTimer
-from qtpy.QtWidgets import (QApplication, QCheckBox, QFileDialog, QGridLayout, QGroupBox,
-                            QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar,
-                            QPushButton, QSpinBox, QVBoxLayout, QWidget)
+from qtpy.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QGridLayout,
+                            QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+                            QProgressBar, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout,
+                            QWidget)
 
 HERE = pathlib.Path(__file__).resolve().parent
+RECENT_FILE = pathlib.Path(os.environ.get("CANMAC_RECENT_FILE",
+                                          pathlib.Path.home() / ".config" / "macro_candi"
+                                          / "recent_stores.json"))
+RECENT_MAX = 8
+
+
+def recent() -> list:
+    """Recently opened stores that still exist, newest first (never raises)."""
+    try:
+        items = json.loads(RECENT_FILE.read_text())
+        return [p for p in items if isinstance(p, str) and os.path.isdir(p)][:RECENT_MAX]
+    except (OSError, ValueError):
+        return []
+
+
+def remember(store: str) -> None:
+    """Put ``store`` at the top of the recent list (best effort: a read-only home is fine)."""
+    try:
+        items = [store] + [p for p in recent() if p != store]
+        RECENT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        RECENT_FILE.write_text(json.dumps(items[:RECENT_MAX], indent=1))
+    except OSError:
+        pass
+
+
+class DatasetPanel(QWidget):
+    """Choose the OME-Zarr to crop from (Browse… / paste a path / Recent), then switch the
+    timepoint or preview level without restarting. ``load_fn(path, t, level)`` does the
+    work and raises with a user-facing message when the path is not a usable dataset."""
+
+    def __init__(self, viewer, load_fn, t: int = 0, level=None):
+        super().__init__()
+        self.v, self.load_fn = viewer, load_fn
+        self.store = None
+        self._t0, self._level0 = t, level
+
+        lay = QVBoxLayout(self)
+        lay.setAlignment(Qt.AlignTop)
+        self.intro = QLabel(
+            "<b>Choose the dataset to crop.</b> Click <b>Browse…</b> and pick its OME-Zarr "
+            "folder: the folder ending in <code>.zarr</code>, e.g. <code>raw.zarr</code>. "
+            "A folder inside it, or the folder just above it, works too.")
+        self.intro.setWordWrap(True)
+        lay.addWidget(self.intro)
+
+        row = QHBoxLayout()
+        self.path = QLineEdit()
+        self.path.setPlaceholderText("/path/to/raw.zarr  (or paste a path, then Enter)")
+        self.path.returnPressed.connect(lambda: self.open_path(self.path.text()))
+        self.browse_btn = QPushButton("Browse…")
+        self.browse_btn.clicked.connect(self.browse)
+        self.open_btn = QPushButton("Open")
+        self.open_btn.clicked.connect(lambda: self.open_path(self.path.text()))
+        row.addWidget(self.path, 1)
+        row.addWidget(self.browse_btn)
+        row.addWidget(self.open_btn)
+        lay.addLayout(row)
+
+        self.recent_box = QComboBox()
+        # long paths must not widen the dock (and shrink the image): elide them instead
+        self.recent_box.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.recent_box.setMinimumContentsLength(24)
+        self.recent_box.view().setTextElideMode(Qt.ElideMiddle)
+        self.recent_box.activated.connect(self._recent_chosen)
+        lay.addWidget(self.recent_box)
+        self._fill_recent()
+
+        self.info = QLabel("")
+        self.info.setWordWrap(True)
+        lay.addWidget(self.info)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Timepoint"))
+        self.t = QSpinBox()
+        self.t.setToolTip("Which timepoint to look at (the Crop panel's time range starts here)")
+        row.addWidget(self.t)
+        row.addWidget(QLabel("Preview level"))
+        self.level = QSpinBox()
+        self.level.setToolTip("Pyramid level to display: higher = coarser and faster. "
+                              "Crops are always written at full resolution.")
+        row.addWidget(self.level)
+        self.show_btn = QPushButton("Show")
+        self.show_btn.setToolTip("Reload at this timepoint / level (the crop box is kept)")
+        self.show_btn.clicked.connect(
+            lambda: self.open_path(self.store, t=self.t.value(), level=self.level.value()))
+        row.addWidget(self.show_btn)
+        lay.addLayout(row)
+        self.view_row = [self.t, self.level, self.show_btn]
+
+        self.msg = QLabel("")
+        self.msg.setWordWrap(True)
+        self.msg.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lay.addWidget(self.msg)
+        _fluid(self.intro, self.info, self.msg)
+        self._set_loaded(False)
+
+    # ---------------- state ----------------
+    def _set_loaded(self, loaded: bool):
+        for w in self.view_row:
+            w.setEnabled(loaded)
+        self.intro.setVisible(not loaded)
+
+    def _fill_recent(self):
+        self.recent_box.clear()
+        items = recent()
+        self.recent_box.addItem("Recent datasets…" if items else "Recent datasets: none yet")
+        for p in items:
+            self.recent_box.addItem(p)
+        self.recent_box.setEnabled(bool(items))
+
+    def _recent_chosen(self, index: int):
+        if index > 0:
+            self.open_path(self.recent_box.itemText(index))
+        self.recent_box.setCurrentIndex(0)
+
+    def waiting(self):
+        """Nothing loaded yet: say so on the (empty) canvas too."""
+        self.v.text_overlay.visible = True
+        self.v.text_overlay.position = "top_left"
+        self.v.text_overlay.font_size = 12
+        self.v.text_overlay.text = ("No dataset open yet.\n"
+                                    "Choose one in the Dataset panel on the right: Browse…")
+
+    # ---------------- actions ----------------
+    def browse(self):
+        start = self.path.text().strip() or self.store or str(pathlib.Path.cwd())
+        start = start if os.path.isdir(start) else os.path.dirname(start) or str(pathlib.Path.cwd())
+        d = QFileDialog.getExistingDirectory(
+            self, "Choose the OME-Zarr folder (the one ending in .zarr)", start)
+        if d:
+            self.open_path(d)
+
+    def open_path(self, path, t=None, level=None) -> bool:
+        """Load ``path`` (any folder in or just above a store). Errors are shown, not raised."""
+        if not path:
+            self.msg.setText("<span style='color:#d33'>No folder given: click Browse… or "
+                             "paste the path of the .zarr folder.</span>")
+            return False
+        if t is None and self.store is None:
+            t, level = self._t0, self._level0  # the command line's choice, first time only
+        self.msg.setText("Opening…")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        QApplication.processEvents()
+        try:
+            prep = self.load_fn(path, t, level)
+        except Exception as e:  # noqa: BLE001 - show every failure, keep the GUI alive
+            name = type(e).__name__
+            text = str(e) if name == "LoadError" else f"{name}: {e}"
+            self.msg.setText(f"<span style='color:#d33'><b>Couldn't open it.</b> {_breakable(text)}</span>")
+            print(f"couldn't open {path}: {text}")
+            return False
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.store = prep["store"]
+        self.path.setText(self.store)
+        s0, um, ax = prep["shape0"], prep["um"], prep["axes"]
+        dims = " × ".join(str(s0[ax.index(d)]) for d in "zyx")
+        n_lv = len(prep["levels"])
+        self.info.setText(
+            f"<b>{pathlib.Path(self.store).name}</b>: {dims} voxels (z, y, x) at "
+            f"{um['x']:g} µm · {prep['n_t']} timepoint{'s' if prep['n_t'] != 1 else ''} · "
+            f"{len(prep['chans'])} channel{'s' if len(prep['chans']) != 1 else ''} · "
+            f"{n_lv} pyramid level{'s' if n_lv != 1 else ''}")
+        self.t.setRange(0, prep["n_t"] - 1)
+        self.t.setValue(prep["t"])
+        self.level.setRange(0, n_lv - 1)
+        self.level.setValue(prep["level"])
+        self._set_loaded(True)
+        self._fill_recent()
+        self.msg.setText("")
+        return True
 
 
 def _load_cropper():
@@ -29,6 +202,22 @@ def _load_cropper():
     spec.loader.exec_module(mod)
     os.chdir(cwd)
     return mod
+
+
+def _fluid(*labels) -> None:
+    """Wrap these labels to the panel's width instead of widening the panel to fit them."""
+    for lab in labels:
+        lab.setWordWrap(True)
+        pol = lab.sizePolicy()  # keeps word wrap's height-for-width flag
+        pol.setHorizontalPolicy(QSizePolicy.Ignored)
+        lab.setSizePolicy(pol)
+
+
+def _breakable(text) -> str:
+    """HTML-escape ``text`` and let paths in it wrap after each '/', so one long unbroken
+    path can't make the panel wider than its dock."""
+    import html
+    return html.escape(str(text)).replace("/", "/​")
 
 
 def _size(gib: float) -> str:
@@ -175,6 +364,7 @@ class CropPanel(QWidget):
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextSelectableByMouse)
         lay.addWidget(self.status)
+        _fluid(steps, self.box_um, self.size, self.status)
 
         self.timer = QTimer(self)
         self.timer.setInterval(200)
@@ -385,7 +575,7 @@ class CropPanel(QWidget):
         self.update_estimate()
         if job["error"]:
             self.bar.setVisible(False)
-            self.status.setText(f"<span style='color:#d33'><b>Crop failed:</b> {job['error']}</span>")
+            self.status.setText(f"<span style='color:#d33'><b>Crop failed:</b> {_breakable(job['error'])}</span>")
             print(f"crop failed: {job['error']}")
             return
         secs = time.time() - job["t0"]
@@ -393,5 +583,5 @@ class CropPanel(QWidget):
         QApplication.clipboard().setText(target)
         self.status.setText(
             f"<b>Done</b> in {secs:.0f} s. In Blender → Microscopy Nodes, open:<br>"
-            f"<code>{target}</code><br>(path copied to the clipboard)")
+            f"<code>{_breakable(target)}</code><br>(path copied to the clipboard)")
         print(f"\ndone in {secs:.1f}s -> {job['out']}\nOpen in Blender: Microscopy Nodes -> {target}")

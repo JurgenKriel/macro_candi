@@ -29,7 +29,7 @@ you the command-line version of whatever you set up, for repeating a crop in a b
 
 ```mermaid
 flowchart LR
-    a["Open the GUI<br/>(coarse level, 2D)"] --> b["Draw box"]
+    a["Open the GUI,<br/>choose the dataset"] --> b["Draw box"]
     b --> c["Z range:<br/>Start here / End here"]
     c --> d["Time, channels,<br/>output"]
     d --> e{"Panel says<br/>fits?"}
@@ -44,8 +44,11 @@ flowchart LR
       own workstation. Over plain SSH, use the [command line](#crop-from-the-command-line).
 - [ ] **The pixi environment installed** (`pixi install`; see [Installation](../getting-started/installation.md)).
       Commands below are run from the repository root with `pixi run python ...`.
-- [ ] **The source store.** The default is `full_stack/raw.zarr` in the repository. Point to
-      another store with `--store PATH`, or set it once per shell:
+- [ ] **The dataset as OME-Zarr**: a folder ending in `.zarr` (for example
+      `full_stack/raw.zarr`) made by [stage 1, Conversion](01-conversion.md). CZI or TIFF
+      files need converting first. In the GUI you **choose it in napari**; you don't need to
+      know the path in advance. The command line takes it as `--store PATH`, or from a
+      variable set once per shell (the default is `full_stack/raw.zarr` in the repository):
 
     ```bash
     export CANMAC_FULLSTACK_ZARR=/path/to/full_stack/raw.zarr
@@ -57,31 +60,59 @@ flowchart LR
 !!! tip "Practise on the demo store first"
     The [synthetic demo](../getting-started/demo.md) store is tiny (128 × 128 × 48 voxels,
     24 timepoints) and opens instantly. Generate it once with `pixi run demo`, or with
-    `python -m canmac.demo generate`, then add `--store data/demo/DEMO/raw.zarr` to the
-    commands on this page. Everything works the same way as on the real data. The
-    screenshots below are from the demo.
+    `python -m canmac.demo generate`, then choose `data/demo` in the GUI (or add
+    `--store data/demo/DEMO/raw.zarr` to the commands on this page). Everything works the
+    same way as on the real data. The screenshots below are from the demo.
 
 ## Crop in napari
 
-### 1. Open the crop GUI
+### 1. Open the crop GUI and choose your dataset
 
 ```bash
 pixi run python scripts/cropping/12_crop_roi.py --gui
-# or, to practise:
-pixi run python scripts/cropping/12_crop_roi.py --gui --store data/demo/DEMO/raw.zarr
 ```
 
-napari opens on timepoint 0 (pick another with `--t0 N`), at a coarse pyramid level, which
-is fast to look around in. Only the planes on screen are read, never the whole dataset. You
-get one layer per channel (*Candida* red, macrophages green), an empty **crop box** layer,
-and the **Crop** panel on the right. The view is **2D**, one Z slice at a time; move through Z
-with the slider under the image.
+napari opens with a **Dataset** panel on the right. Tell it which dataset to crop, in any of
+these ways:
+
+- Click **Browse…** and pick the dataset's `.zarr` folder.
+- Paste a path into the box and press ++enter++ (or **Open**).
+- Choose one from **Recent datasets**: the GUI remembers the last eight you opened.
 
 <figure markdown="span">
-  ![The crop GUI in 2D: the image with a yellow crop rectangle in the middle, the layer list on the left with a "crop box" layer above the channel layers, and the Crop panel on the right with step-by-step instructions, Draw box / Whole slice / Clear buttons, x/y/z start and end boxes, Start here / End here buttons, time range, channel checkboxes, output path, the Blender size check and the Copy command / Crop buttons](../assets/cropping/02-draw-box.png){ loading=lazy }
+  ![napari just after starting: an empty canvas, and on the right the Dataset panel with the instruction "Choose the dataset to crop", a path box with Browse… and Open buttons, a "Recent datasets" list, and Timepoint / Preview level boxes](../assets/cropping/00-open-dataset.png){ loading=lazy }
+  <figcaption>Started without a dataset: choose one in the Dataset panel.</figcaption>
+</figure>
+
+You don't have to hit the `.zarr` folder exactly. A folder **inside** it (`raw.zarr/0`)
+works, and so does the folder **just above** it if that holds only one dataset: picking
+`data/demo` opens `data/demo/DEMO/raw.zarr`. If the choice can't be opened, the panel says
+why in red (a single CZI file, a folder with several datasets in it, …) and you can simply
+choose again. See [troubleshooting](#troubleshooting).
+
+!!! tip "Skip the choosing"
+    If you already know the path, give it on the command line and the dataset opens straight
+    away: `12_crop_roi.py --gui --store /path/to/raw.zarr` (or `--store data/demo` to
+    practise). With `CANMAC_FULLSTACK_ZARR` set, or a `full_stack/raw.zarr` in the
+    repository, that opens without `--store` too.
+
+Once it's open, the panel shows the dataset's size, voxel size, number of timepoints and
+channels. It shows timepoint 0 at a coarse pyramid level, which is fast to look around in.
+Only the planes on screen are read, never the whole dataset. You get one layer per channel
+(*Candida* red, macrophages green), an empty **crop box** layer, and the **Crop** panel
+below the Dataset panel. The view is **2D**, one Z slice at a time; move through Z with the
+slider under the image.
+
+To look at another **timepoint** or **preview level**, change it in the Dataset panel and
+click **Show**. Your box stays where it is. Opening a **different dataset** starts with a
+fresh box, as its coordinates mean something else.
+
+<figure markdown="span">
+  ![The crop GUI in 2D: the image with a yellow crop rectangle in the middle, the layer list on the left with a "crop box" layer above the channel layers, the Dataset panel at the top right showing data/demo/DEMO/raw.zarr at timepoint 12, and the Crop panel below it with step-by-step instructions, Draw box / Whole slice / Clear buttons, x/y/z start and end boxes, Start here / End here buttons, time range, channel checkboxes, output path, the Blender size check and the Copy command / Crop buttons](../assets/cropping/02-draw-box.png){ loading=lazy }
   <figcaption>The crop GUI with a box drawn. <b>Left:</b> layers; the <code>crop box</code>
   layer holds your rectangle. <b>Middle:</b> the image; the overlay (top-left) shows the cursor
-  and the box in full-resolution voxels. <b>Right:</b> the Crop panel.</figcaption>
+  and the box in full-resolution voxels. <b>Right:</b> the Dataset panel (which dataset,
+  timepoint and preview level) and the Crop panel.</figcaption>
 </figure>
 
 To look at the whole volume in 3D first, click the **2D/3D** button (bottom-left) or start
@@ -133,8 +164,8 @@ slice is inside.
 - **Channels:** untick any you don't need. The lysed-cell channel is never offered unless
   you started the GUI with `--include-lysed`.
 
-Cells move. Check the box still covers what you care about at other timepoints by
-restarting with a different `--t0`.
+Cells move. Check the box still covers what you care about at other timepoints: set
+**Timepoint** in the Dataset panel and click **Show**. The box stays put while you look.
 
 ### 5. Check the size
 
@@ -180,7 +211,8 @@ The panel asks before **replacing** an existing output, and before writing a cro
 
 ### 7. Check the result and open it in Blender
 
-Open the crop in the same viewer, in 3D at full resolution:
+To look at it in the crop GUI, paste its path into the Dataset panel (it is on the
+clipboard) and press ++enter++. Or open it on its own, in 3D at full resolution:
 
 ```bash
 pixi run python scripts/cropping/11_preview_crop.py 0 --store crops/roi_a.zarr --level 0 --3d --no-panel
@@ -295,14 +327,15 @@ crops/roi_a.zarr/
 ### `12_crop_roi.py --gui` / `11_preview_crop.py T`: the crop GUI
 
 `12_crop_roi.py --gui` opens the same window as `11_preview_crop.py`. It passes on
-`--store`, `--t0` (the timepoint shown), `--channels`, `--include-lysed` and any box flags,
-which pre-fill the panel.
+`--store`, `--t0` (the timepoint shown first), `--level`, `--channels`, `--include-lysed`
+and any box flags, which pre-fill the crop box. Everything is optional: with no options the
+window opens and asks for the dataset.
 
 | Option (`11_preview_crop.py`) | Default | Meaning |
 |---|---|---|
-| `T` | required | Timepoint to show (0-based); the panel's time range starts here |
-| `--store PATH` | `$CANMAC_FULLSTACK_ZARR`, else `full_stack/raw.zarr` | Source OME-Zarr (the folder containing `0/`) |
-| `--x0 --x1 --y0 --y1 --z0 --z1` | full extent | Load only this region (level-0 voxels). Use it with `--level 0` for a sharper look at a small area |
+| `T` | `0` | Timepoint to show first (0-based); the panel's time range starts here. Change it later in the Dataset panel |
+| `--store PATH` | `$CANMAC_FULLSTACK_ZARR`, else `full_stack/raw.zarr` if it exists, else **ask in the window** | Dataset to open: the `.zarr` folder, a folder inside it, or the folder just above it |
+| `--x0 --x1 --y0 --y1 --z0 --z1` | full extent | Load only this region (level-0 voxels), and pre-fill the crop box with it. Use it with `--level 0` for a sharper look at a small area |
 | `--level N` | 2, or the coarsest level available | Pyramid level to *display*. Crops are always written at full resolution |
 | `--channels` | `all` | Channels to show and offer in the panel (see below) |
 | `--include-lysed` | off | Also show and offer the lysed-cell channel |
@@ -332,6 +365,24 @@ colour (`FF0000`, `00FF00`); `1,2` match by position in the store (the summary l
 | `--overwrite` | off | Replace `--out` if it already exists |
 
 ## Troubleshooting
+
+??? question "The Dataset panel says **Couldn't open it.**"
+    The red message says what it found instead of a dataset. Choose again; nothing else needs
+    restarting.
+
+    - **`… is a single file`**: you picked a CZI / TIFF / other file. The cropper reads the
+      OME-Zarr *folder* that [Conversion](01-conversion.md) writes. Convert first, then pick
+      the `.zarr` folder.
+    - **`No OME-Zarr dataset found in …`**: that folder has no dataset in it or directly
+      below it. Pick the folder ending in `.zarr` (it contains a folder called `0`).
+    - **`… holds 3 datasets (ROI2/raw.zarr, …). Choose one of them.`**: you picked a folder
+      above several datasets. Go one level further down.
+    - **`… does not exist`**: check the path. A relative path is taken from the folder you
+      started the command in.
+    - **`… without the bioformats2raw '0/' level`**: an OME-Zarr image written by another
+      tool. Re-convert it with [Conversion](01-conversion.md).
+    - **`Timepoint 30 doesn't exist`** / **`Preview level 3 doesn't exist`**: pick one within
+      the range in the info line.
 
 ??? failure "`Error drawing visual <Volume …>` then `Segmentation fault (core dumped)`"
     napari's 3D view needs OpenGL that can render 3D textures, and the remote desktop's
@@ -418,5 +469,6 @@ No. The analysis stages always read the original dataset stores; crops are only 
 visualisation and sharing.
 
 **Can I crop from the per-ROI datasets (ROI2, ROI7) instead of the full stack?**
-Yes. Pass that dataset's `raw.zarr` as `--store`. Any OME-Zarr in the bioformats2raw layout
+Yes. Choose that dataset's `raw.zarr` in the Dataset panel, or pass it as `--store`. Any
+OME-Zarr in the bioformats2raw layout
 (a folder containing `0/` with `t, c, z, y, x` axes) works, including a crop you made earlier.
